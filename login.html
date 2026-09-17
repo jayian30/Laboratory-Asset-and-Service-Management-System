@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - Laboratory Asset & Service Management System</title>
+    
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="supabase.js"></script>
+    <script src="audit.js"></script>
+    <script src="auth.js" defer></script>
+</head>
+
+<body class="login-body">
+
+    <div class="login-container">
+        <div class="login-card">
+            <div class="login-icon">🔬</div>
+            <h1>Lab Asset & Service Manager</h1>
+            <p class="login-subtitle">Laboratory Equipment & Borrowing System</p>
+
+            <form id="loginForm">
+                
+                <div class="form-group" id="fullNameGroup" style="display: none;">
+                    <label for="fullName">Full Name *</label>
+                    <input type="text" id="fullName" placeholder="e.g. Maria Santos">
+                </div>
+
+                <div class="form-group" id="roleSelectGroup" style="display: none;">
+                    <label for="registerRole">Role *</label>
+                    <select id="registerRole">
+                        <option value="requester">Requester / Student / Faculty</option>
+                        <option value="staff">Laboratory Staff</option>
+                        <option value="admin">Administrator</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="email">Email Address *</label>
+                    <input type="email" id="email" placeholder="name@college.edu.ph" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="password">Password *</label>
+                    <input type="password" id="password" placeholder="Enter your password" required>
+                </div>
+
+                <button type="submit" class="btn btn-primary login-btn" id="authSubmitButton">
+                    Login
+                </button>
+
+                <p id="loginMessage" class="login-message"></p>
+
+                <div class="auth-switch">
+                    <span id="authSwitchText">Don't have an account?</span>
+                    <button type="button" class="link-button" id="authSwitchButton">
+                        Create one
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+</body>
+</html>

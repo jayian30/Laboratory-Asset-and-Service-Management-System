@@ -1,0 +1,715 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Laboratory Asset and Service Management System</title>
+    
+    <!-- Modern Typography & Icons -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+
+    <!-- Supabase SDK CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    
+    <!-- Application Scripts -->
+    <script src="supabase.js"></script>
+    <script src="audit.js"></script>
+    <script src="auth.js"></script>
+    <script src="equipment.js"></script>
+    <script src="requests.js"></script>
+    <script src="maintenance.js"></script>
+    <script src="users.js"></script>
+    <script src="dashboard.js"></script>
+</head>
+<body>
+
+    <!-- TOP HEADER -->
+    <header class="app-header">
+        <div class="brand">
+            <span class="brand-icon">🔬</span>
+            <div class="brand-text">
+                <h1>Lab Asset & Service Manager</h1>
+                <p>Laboratory Equipment Borrowing & Maintenance System</p>
+            </div>
+        </div>
+
+        <div class="user-profile-header">
+            <div class="user-avatar">👤</div>
+            <div class="user-details">
+                <span id="headerUserName" class="user-name">Loading...</span>
+                <span id="headerUserRole" class="badge badge-primary">ROLE</span>
+            </div>
+            <button class="logout-btn" onclick="logout()">Logout 🚪</button>
+        </div>
+    </header>
+
+    <!-- NAVIGATION BAR -->
+    <nav class="app-nav">
+        <div class="nav-container">
+            <!-- Dashboard (All Roles) -->
+            <button class="nav-link active" onclick="showSection('dashboardSection')">
+                📊 Dashboard
+            </button>
+
+            <!-- Admin & Staff: Equipment Management -->
+            <button class="nav-link" data-role-required="admin,staff" onclick="showSection('equipmentSection')">
+                📦 Equipment Management
+            </button>
+
+            <!-- Admin & Staff: Borrowing Requests -->
+            <button class="nav-link" data-role-required="admin,staff" onclick="showSection('requestsSection')">
+                📋 Borrowing Requests
+            </button>
+
+            <!-- Admin & Staff: Maintenance Requests -->
+            <button class="nav-link" data-role-required="admin,staff" onclick="showSection('maintenanceSection')">
+                🛠️ Maintenance
+            </button>
+
+            <!-- Admin Only: User Management -->
+            <button class="nav-link" data-role-required="admin" onclick="showSection('usersSection')">
+                👥 User Management
+            </button>
+
+            <!-- Admin Only: Audit Logs -->
+            <button class="nav-link" data-role-required="admin" onclick="showSection('auditLogsSection')">
+                📜 Audit Logs
+            </button>
+
+            <!-- Requester Only: Available Equipment -->
+            <button class="nav-link" data-role-required="requester" onclick="showSection('availableEquipmentSection')">
+                🔍 Available Equipment
+            </button>
+
+            <!-- Requester Only: My Requests -->
+            <button class="nav-link" data-role-required="requester" onclick="showSection('myRequestsSection')">
+                📝 Submit / My Requests
+            </button>
+
+            <!-- Requester Only: My History -->
+            <button class="nav-link" data-role-required="requester" onclick="showSection('myHistorySection')">
+                📁 My History
+            </button>
+        </div>
+    </nav>
+
+    <!-- MAIN CONTAINER -->
+    <main class="main-content">
+
+        <!-- ===================================================================
+             1. DASHBOARD SECTION
+        ==================================================================== -->
+        <section id="dashboardSection" class="page-section">
+            <div class="page-header">
+                <h2>System Dashboard</h2>
+                <p>Real-time analytics and operational status</p>
+            </div>
+
+            <!-- ADMIN DASHBOARD VIEW -->
+            <div id="adminDashboardView" class="role-dashboard">
+                <div class="metrics-grid">
+                    <div class="metric-card card-blue">
+                        <div class="metric-icon">📦</div>
+                        <div class="metric-info">
+                            <h3>Total Equipment</h3>
+                            <p id="adminTotalEquip">0</p>
+                        </div>
+                    </div>
+                    <div class="metric-card card-green">
+                        <div class="metric-icon">✅</div>
+                        <div class="metric-info">
+                            <h3>Available</h3>
+                            <p id="adminAvailEquip">0</p>
+                        </div>
+                    </div>
+                    <div class="metric-card card-amber">
+                        <div class="metric-icon">🔄</div>
+                        <div class="metric-info">
+                            <h3>Borrowed</h3>
+                            <p id="adminBorrowedEquip">0</p>
+                        </div>
+                    </div>
+                    <div class="metric-card card-purple">
+                        <div class="metric-icon">🛠️</div>
+                        <div class="metric-info">
+                            <h3>Maintenance</h3>
+                            <p id="adminMaintEquip">0</p>
+                        </div>
+                    </div>
+                    <div class="metric-card card-orange">
+                        <div class="metric-icon">⏳</div>
+                        <div class="metric-info">
+                            <h3>Pending Requests</h3>
+                            <p id="adminPendingReq">0</p>
+                        </div>
+                    </div>
+                    <div class="metric-card card-teal">
+                        <div class="metric-icon">👍</div>
+                        <div class="metric-info">
+                            <h3>Approved</h3>
+                            <p id="adminApprovedReq">0</p>
+                        </div>
+                    </div>
+                    <div class="metric-card card-red">
+                        <div class="metric-icon">⚠️</div>
+                        <div class="metric-info">
+                            <h3>Overdue</h3>
+                            <p id="adminOverdueReq">0</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Recent Audit Log Feed -->
+                <div class="card-panel margin-top">
+                    <div class="panel-header">
+                        <h3>📜 Recent Audit Activities</h3>
+                        <button class="btn btn-sm btn-outline" onclick="showSection('auditLogsSection')">View Full Log</button>
+                    </div>
+                    <div class="table-responsive">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Time</th>
+                                    <th>User</th>
+                                    <th>Action</th>
+                                    <th>Module</th>
+                                    <th>Description</th>
+                                </tr>
+                            </thead>
+                            <tbody id="recentAuditTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- STAFF DASHBOARD VIEW -->
+            <div id="staffDashboardView" class="role-dashboard" style="display:none;">
+                <div class="metrics-grid">
+                    <div class="metric-card card-green">
+                        <div class="metric-icon">✅</div>
+                        <div class="metric-info">
+                            <h3>Available Equipment</h3>
+                            <p id="staffAvailEquip">0</p>
+                        </div>
+                    </div>
+                    <div class="metric-card card-blue">
+                        <div class="metric-icon">📤</div>
+                        <div class="metric-info">
+                            <h3>Active Borrowings</h3>
+                            <p id="staffActiveBorrowing">0</p>
+                        </div>
+                    </div>
+                    <div class="metric-card card-orange">
+                        <div class="metric-icon">⏳</div>
+                        <div class="metric-info">
+                            <h3>Pending Requests</h3>
+                            <p id="staffPendingReq">0</p>
+                        </div>
+                    </div>
+                    <div class="metric-card card-red">
+                        <div class="metric-icon">⚠️</div>
+                        <div class="metric-info">
+                            <h3>Returns Due / Overdue</h3>
+                            <p id="staffReturnsDue">0</p>
+                        </div>
+                    </div>
+                    <div class="metric-card card-purple">
+                        <div class="metric-icon">🛠️</div>
+                        <div class="metric-info">
+                            <h3>Maintenance Requests</h3>
+                            <p id="staffMaintReq">0</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- REQUESTER DASHBOARD VIEW -->
+            <div id="requesterDashboardView" class="role-dashboard" style="display:none;">
+                <div class="metrics-grid">
+                    <div class="metric-card card-green">
+                        <div class="metric-icon">🔍</div>
+                        <div class="metric-info">
+                            <h3>Available Equipment</h3>
+                            <p id="reqAvailEquip">0</p>
+                        </div>
+                    </div>
+                    <div class="metric-card card-orange">
+                        <div class="metric-icon">⏳</div>
+                        <div class="metric-info">
+                            <h3>My Pending Requests</h3>
+                            <p id="reqPending">0</p>
+                        </div>
+                    </div>
+                    <div class="metric-card card-teal">
+                        <div class="metric-icon">👍</div>
+                        <div class="metric-info">
+                            <h3>My Approved Requests</h3>
+                            <p id="reqApproved">0</p>
+                        </div>
+                    </div>
+                    <div class="metric-card card-blue">
+                        <div class="metric-icon">📦</div>
+                        <div class="metric-info">
+                            <h3>My Active Borrowings</h3>
+                            <p id="reqActive">0</p>
+                        </div>
+                    </div>
+                    <div class="metric-card card-purple">
+                        <div class="metric-icon">✔️</div>
+                        <div class="metric-info">
+                            <h3>My Completed Requests</h3>
+                            <p id="reqCompleted">0</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ===================================================================
+             2. EQUIPMENT MANAGEMENT SECTION (ADMIN & STAFF)
+        ==================================================================== -->
+        <section id="equipmentSection" class="page-section hidden">
+            <div class="page-header">
+                <h2>Equipment Management</h2>
+                <p>Manage equipment records, quantities, and operational condition</p>
+            </div>
+
+            <!-- Add / Edit Equipment Form -->
+            <div class="card-panel">
+                <h3 id="equipmentFormTitle">Add New Equipment</h3>
+                <form id="equipmentForm">
+                    <input type="hidden" id="equipmentId">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="equipmentName">Equipment Name *</label>
+                            <input type="text" id="equipmentName" placeholder="e.g. Dell Latitude Laptop 15&quot;" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="equipmentCode">Asset Code / Equipment Code *</label>
+                            <input type="text" id="equipmentCode" placeholder="e.g. LAP-001" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="equipmentCategory">Category *</label>
+                            <select id="equipmentCategory" required>
+                                <option value="">Select Category</option>
+                                <option value="Laptop">Laptop</option>
+                                <option value="Projector">Projector</option>
+                                <option value="Camera">Camera</option>
+                                <option value="Microphone">Microphone</option>
+                                <option value="Router">Router</option>
+                                <option value="Toolkit">Computer Toolkit</option>
+                                <option value="Other">Other ICT Equipment</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="equipmentQuantity">Quantity *</label>
+                            <input type="number" id="equipmentQuantity" min="1" value="1" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="equipmentLocation">Laboratory Location</label>
+                            <input type="text" id="equipmentLocation" placeholder="e.g. Lab 101 / AVR Room" value="Main Laboratory">
+                        </div>
+                        <div class="form-group">
+                            <label for="equipmentCondition">Condition</label>
+                            <select id="equipmentCondition">
+                                <option value="Good">Good</option>
+                                <option value="Fair">Fair</option>
+                                <option value="For Repair">For Repair</option>
+                                <option value="Damaged">Damaged</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="equipmentDescription">Description / Specifications</label>
+                        <textarea id="equipmentDescription" rows="2" placeholder="Enter specifications or serial number details..."></textarea>
+                    </div>
+
+                    <div class="form-actions">
+                        <button type="submit" class="btn btn-primary">Save Equipment</button>
+                        <button type="button" class="btn btn-light" onclick="clearEquipmentForm()">Clear Form</button>
+                    </div>
+                </form>
+            </div>
+
+            <!-- Search & Filter Controls -->
+            <div class="filter-bar">
+                <input type="text" id="equipmentSearch" placeholder="Search equipment name, code, category..." class="search-input">
+                <select id="equipmentStatusFilter" class="filter-select">
+                    <option value="All">All Statuses</option>
+                    <option value="Available">Available</option>
+                    <option value="Borrowed">Borrowed</option>
+                    <option value="Maintenance">Maintenance</option>
+                    <option value="Damaged">Damaged</option>
+                </select>
+            </div>
+
+            <!-- Equipment Table -->
+            <div class="card-panel">
+                <h3>Equipment Inventory Records</h3>
+                <div class="table-responsive">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Asset Code</th>
+                                <th>Equipment Name</th>
+                                <th>Category</th>
+                                <th>Avail / Qty</th>
+                                <th>Location</th>
+                                <th>Condition</th>
+                                <th>Status</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="equipmentTableBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- ===================================================================
+             3. AVAILABLE EQUIPMENT SECTION (REQUESTER VIEW)
+        ==================================================================== -->
+        <section id="availableEquipmentSection" class="page-section hidden">
+            <div class="page-header">
+                <h2>Available Laboratory Equipment</h2>
+                <p>Browse equipment ready for borrowing</p>
+            </div>
+
+            <div class="filter-bar">
+                <input type="text" id="availableSearch" placeholder="Search equipment name or code..." class="search-input">
+                <select id="availableCategoryFilter" class="filter-select">
+                    <option value="All">All Categories</option>
+                    <option value="Laptop">Laptop</option>
+                    <option value="Projector">Projector</option>
+                    <option value="Camera">Camera</option>
+                    <option value="Microphone">Microphone</option>
+                    <option value="Router">Router</option>
+                </select>
+            </div>
+
+            <div id="availableEquipmentGrid" class="equipment-grid"></div>
+        </section>
+
+        <!-- ===================================================================
+             4. BORROWING REQUESTS MANAGEMENT SECTION (ADMIN & STAFF)
+        ==================================================================== -->
+        <section id="requestsSection" class="page-section hidden">
+            <div class="page-header">
+                <h2>Borrowing Requests Management</h2>
+                <p>Review, approve, release, and process returns for laboratory equipment</p>
+            </div>
+
+            <div class="filter-bar">
+                <input type="text" id="requestSearch" placeholder="Search borrower, equipment, or department..." class="search-input">
+                <select id="requestStatusFilter" class="filter-select">
+                    <option value="All">All Statuses</option>
+                    <option value="Pending">Pending</option>
+                    <option value="Approved">Approved</option>
+                    <option value="Rejected">Rejected</option>
+                    <option value="Released">Released</option>
+                    <option value="Returned">Returned</option>
+                    <option value="Overdue">Overdue</option>
+                </select>
+            </div>
+
+            <div class="card-panel">
+                <h3>Transaction Records</h3>
+                <div class="table-responsive">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Borrower</th>
+                                <th>Equipment</th>
+                                <th>Qty</th>
+                                <th>Purpose</th>
+                                <th>Borrowed Date</th>
+                                <th>Expected Return</th>
+                                <th>Actual Return</th>
+                                <th>Status</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="requestsTableBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- ===================================================================
+             5. REQUESTER MY REQUESTS SECTION
+        ==================================================================== -->
+        <section id="myRequestsSection" class="page-section hidden">
+            <div class="page-header">
+                <h2>Submit & Track Borrowing Requests</h2>
+                <p>Submit borrowing requests and track approval progress</p>
+            </div>
+
+            <!-- Submit Borrowing Form -->
+            <div class="card-panel">
+                <h3>Submit New Borrowing Request</h3>
+                <form id="borrowingRequestForm">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="requestBorrowerName">Borrower Full Name *</label>
+                            <input type="text" id="requestBorrowerName" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="requestBorrowerType">Borrower Type *</label>
+                            <select id="requestBorrowerType" required>
+                                <option value="Student">Student</option>
+                                <option value="Faculty">Faculty</option>
+                                <option value="Staff">Staff</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="requestDepartment">Department / Course *</label>
+                            <input type="text" id="requestDepartment" placeholder="e.g. BSIT 3-A" required>
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="requestEquipmentSelect">Select Available Equipment *</label>
+                            <select id="requestEquipmentSelect" required>
+                                <option value="">-- Select Equipment --</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="requestQuantity">Quantity *</label>
+                            <input type="number" id="requestQuantity" min="1" value="1" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="requestExpectedReturnDate">Expected Return Date *</label>
+                            <input type="date" id="requestExpectedReturnDate" required>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="requestPurpose">Purpose of Borrowing *</label>
+                        <textarea id="requestPurpose" rows="2" placeholder="e.g. Class presentation in Room 302..." required></textarea>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary">Submit Request for Admin Approval</button>
+                </form>
+            </div>
+
+            <!-- Active Requests List -->
+            <div class="card-panel">
+                <h3>My Active & Pending Requests</h3>
+                <div class="table-responsive">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Equipment</th>
+                                <th>Qty</th>
+                                <th>Purpose</th>
+                                <th>Request Date</th>
+                                <th>Expected Return</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="myRequestsTableBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- ===================================================================
+             6. REQUESTER HISTORY SECTION
+        ==================================================================== -->
+        <section id="myHistorySection" class="page-section hidden">
+            <div class="page-header">
+                <h2>My Borrowing History</h2>
+                <p>Completed, returned, and past borrowing transactions</p>
+            </div>
+
+            <div class="card-panel">
+                <h3>Completed Transactions</h3>
+                <div class="table-responsive">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Equipment</th>
+                                <th>Qty</th>
+                                <th>Purpose</th>
+                                <th>Request Date</th>
+                                <th>Expected Return</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="myHistoryTableBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- ===================================================================
+             7. MAINTENANCE REQUESTS SECTION (ADMIN & STAFF)
+        ==================================================================== -->
+        <section id="maintenanceSection" class="page-section hidden">
+            <div class="page-header">
+                <h2>Equipment Maintenance</h2>
+                <p>Report damaged equipment and track laboratory maintenance activities</p>
+            </div>
+
+            <div class="card-panel">
+                <h3>Submit Maintenance Request</h3>
+                <form id="maintenanceForm">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="maintEquipmentSelect">Select Equipment *</label>
+                            <select id="maintEquipmentSelect" required>
+                                <option value="">-- Select Equipment --</option>
+                            </select>
+                        </div>
+                        <div class="form-group flex-2">
+                            <label for="maintIssueDescription">Issue Description *</label>
+                            <input type="text" id="maintIssueDescription" placeholder="e.g. Projector lamp flickers / Screen damaged" required>
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-warning">Log Maintenance Issue</button>
+                </form>
+            </div>
+
+            <div class="filter-bar">
+                <input type="text" id="maintenanceSearch" placeholder="Search equipment or issue description..." class="search-input">
+                <select id="maintenanceStatusFilter" class="filter-select">
+                    <option value="All">All Statuses</option>
+                    <option value="Pending">Pending</option>
+                    <option value="In Maintenance">In Maintenance</option>
+                    <option value="Completed">Completed</option>
+                </select>
+            </div>
+
+            <div class="card-panel">
+                <h3>Maintenance Records</h3>
+                <div class="table-responsive">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Equipment</th>
+                                <th>Reported By</th>
+                                <th>Issue Description</th>
+                                <th>Resolution Notes</th>
+                                <th>Status</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="maintenanceTableBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- ===================================================================
+             8. USER MANAGEMENT SECTION (ADMIN ONLY)
+        ==================================================================== -->
+        <section id="usersSection" class="page-section hidden">
+            <div class="page-header">
+                <h2>User Role Management</h2>
+                <p>Manage system users and assign roles (Administrator, Laboratory Staff, Requester)</p>
+            </div>
+
+            <div class="filter-bar">
+                <input type="text" id="userSearch" placeholder="Search user name or email..." class="search-input">
+                <select id="userRoleFilter" class="filter-select">
+                    <option value="All">All Roles</option>
+                    <option value="admin">Administrator</option>
+                    <option value="staff">Laboratory Staff</option>
+                    <option value="requester">Requester</option>
+                </select>
+            </div>
+
+            <div class="card-panel">
+                <h3>User Accounts & Roles</h3>
+                <div class="table-responsive">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Full Name</th>
+                                <th>Email</th>
+                                <th>Current Role</th>
+                                <th>Joined Date</th>
+                                <th>Role Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="usersTableBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- ===================================================================
+             9. AUDIT LOGS SECTION (ADMIN ONLY)
+        ==================================================================== -->
+        <section id="auditLogsSection" class="page-section hidden">
+            <div class="page-header">
+                <h2>System Audit Logs</h2>
+                <p>Immutable log of critical system operations and administrative transactions</p>
+            </div>
+
+            <div class="filter-bar">
+                <input type="text" id="auditSearch" placeholder="Search logs by user, description, or ID..." class="search-input">
+                <select id="auditActionFilter" class="filter-select">
+                    <option value="All">All Actions</option>
+                    <option value="APPROVED">APPROVED</option>
+                    <option value="REJECTED">REJECTED</option>
+                    <option value="RELEASED">RELEASED</option>
+                    <option value="RETURNED">RETURNED</option>
+                    <option value="CREATED">CREATED</option>
+                    <option value="DELETED">DELETED</option>
+                    <option value="LOGIN">LOGIN</option>
+                    <option value="LOGOUT">LOGOUT</option>
+                    <option value="MAINTENANCE_REQUESTED">MAINTENANCE_REQUESTED</option>
+                </select>
+                <select id="auditModuleFilter" class="filter-select">
+                    <option value="All">All Modules</option>
+                    <option value="Borrowing">Borrowing</option>
+                    <option value="Equipment">Equipment</option>
+                    <option value="Maintenance">Maintenance</option>
+                    <option value="Auth">Auth</option>
+                    <option value="Users">Users</option>
+                </select>
+            </div>
+
+            <div class="card-panel">
+                <h3>Audit Log Records</h3>
+                <div class="table-responsive">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Date / Time</th>
+                                <th>User</th>
+                                <th>Action</th>
+                                <th>Module</th>
+                                <th>Record ID</th>
+                                <th>Description</th>
+                            </tr>
+                        </thead>
+                        <tbody id="auditLogTableBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- FOOTER -->
+    <footer class="app-footer">
+        <p>Laboratory Asset and Service Management System &copy; 2026. Systems Analysis and Design Project.</p>
+    </footer>
+
+</body>
+</html>

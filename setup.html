@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>System Setup - Lab Asset Manager</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: Arial, sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; }
+        .container { background: #1e293b; border-radius: 12px; padding: 32px; max-width: 600px; width: 100%; }
+        h1 { color: #38bdf8; margin-bottom: 8px; }
+        p { color: #94a3b8; margin-bottom: 24px; font-size: 14px; }
+        .btn { width: 100%; padding: 14px; border: none; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer; margin-bottom: 12px; transition: opacity 0.2s; }
+        .btn:hover { opacity: 0.85; }
+        .btn-primary { background: #3b82f6; color: white; }
+        .btn-danger { background: #ef4444; color: white; }
+        .log { background: #0f172a; border-radius: 8px; padding: 16px; min-height: 200px; font-family: monospace; font-size: 13px; line-height: 1.8; overflow-y: auto; max-height: 400px; }
+        .log .success { color: #4ade80; }
+        .log .error { color: #f87171; }
+        .log .info { color: #60a5fa; }
+        .log .warn { color: #fbbf24; }
+        .divider { border: none; border-top: 1px solid #334155; margin: 20px 0; }
+        .accounts { background: #0f172a; border-radius: 8px; padding: 16px; margin-bottom: 20px; }
+        .accounts h3 { color: #38bdf8; margin-bottom: 12px; font-size: 14px; }
+        table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        th { text-align: left; color: #64748b; padding: 4px 8px; }
+        td { padding: 4px 8px; color: #e2e8f0; }
+        tr:nth-child(even) td { background: #1e293b; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>🔧 System Setup</h1>
+    <p>This page creates the 3 test accounts needed to log into the Lab Asset Manager system.</p>
+
+    <div class="accounts">
+        <h3>📋 Test Accounts to be Created</h3>
+        <table>
+            <tr><th>Role</th><th>Email</th><th>Password</th></tr>
+            <tr><td>👑 Admin</td><td>admin@test.com</td><td>Admin@12345</td></tr>
+            <tr><td>🔬 Staff</td><td>staff@test.com</td><td>Staff@12345</td></tr>
+            <tr><td>📋 Requester</td><td>requester@test.com</td><td>Request@12345</td></tr>
+        </table>
+    </div>
+
+    <button class="btn btn-primary" onclick="createTestAccounts()">▶ Create Test Accounts</button>
+    <button class="btn btn-danger" onclick="testLogin()">🔐 Test Login (Admin)</button>
+
+    <hr class="divider">
+    <div class="log" id="log">
+        <span class="info">Ready. Click "Create Test Accounts" to begin...</span>
+    </div>
+</div>
+
+<script>
+    const SUPABASE_URL = "https://opghvmrmszqgjrkmkwrr.supabase.co";
+    const SUPABASE_ANON_KEY = "sb_publishable_kR7V72BNOZvQqLhVOuJJ3w_tdG_7cY0";
+
+    const client = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    const logEl = document.getElementById('log');
+
+    function log(msg, type = 'info') {
+        const line = document.createElement('div');
+        line.className = type;
+        line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+        logEl.appendChild(line);
+        logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    const testAccounts = [
+        { email: 'admin@test.com', password: 'Admin@12345', full_name: 'Maria Santos', role: 'admin' },
+        { email: 'staff@test.com', password: 'Staff@12345', full_name: 'Juan Dela Cruz', role: 'staff' },
+        { email: 'requester@test.com', password: 'Request@12345', full_name: 'Ana Reyes', role: 'requester' }
+    ];
+
+    async function createTestAccounts() {
+        logEl.innerHTML = '';
+        log('Starting account creation...', 'info');
+
+        for (const account of testAccounts) {
+            log(`Creating account: ${account.email} (${account.role})...`, 'info');
+            try {
+                const { data, error } = await client.auth.signUp({
+                    email: account.email,
+                    password: account.password,
+                    options: {
+                        data: {
+                            full_name: account.full_name,
+                            role: account.role
+                        }
+                    }
+                });
+
+                if (error) {
+                    if (error.message.includes('already registered') || error.message.includes('already been registered')) {
+                        log(`⚠ ${account.email} already exists — updating profile role...`, 'warn');
+                    } else {
+                        log(`✗ Error: ${error.message}`, 'error');
+                        continue;
+                    }
+                } else if (data.user) {
+                    log(`✓ Auth user created: ${account.email}`, 'success');
+
+                    // Upsert profile
+                    const { error: profileError } = await client.from('profiles').upsert({
+                        id: data.user.id,
+                        full_name: account.full_name,
+                        email: account.email,
+                        role: account.role
+                    });
+
+                    if (profileError) {
+                        log(`⚠ Profile upsert note: ${profileError.message}`, 'warn');
+                    } else {
+                        log(`✓ Profile set for ${account.email} as [${account.role}]`, 'success');
+                    }
+                }
+
+                // Small delay to avoid rate limiting
+                await new Promise(r => setTimeout(r, 1500));
+
+            } catch (err) {
+                log(`✗ Unexpected error: ${err.message}`, 'error');
+            }
+        }
+
+        log('', 'info');
+        log('✅ Setup complete! You can now go to login.html', 'success');
+        log('👉 admin@test.com / Admin@12345', 'success');
+        log('👉 staff@test.com / Staff@12345', 'success');
+        log('👉 requester@test.com / Request@12345', 'success');
+    }
+
+    async function testLogin() {
+        logEl.innerHTML = '';
+        log('Testing admin login...', 'info');
+        const { data, error } = await client.auth.signInWithPassword({
+            email: 'admin@test.com',
+            password: 'Admin@12345'
+        });
+
+        if (error) {
+            log(`✗ Login failed: ${error.message}`, 'error');
+            log('→ Try running "Create Test Accounts" first', 'warn');
+        } else {
+            log(`✓ Login successful! User: ${data.user.email}`, 'success');
+
+            const { data: profile } = await client.from('profiles').select('*').eq('id', data.user.id).single();
+            if (profile) {
+                log(`✓ Profile found: ${profile.full_name} | Role: ${profile.role}`, 'success');
+            } else {
+                log(`⚠ Profile not found in profiles table — schema.sql may not have been run`, 'warn');
+            }
+
+            log('', 'info');
+            log('✅ Everything works! Redirecting to login page...', 'success');
+            await client.auth.signOut();
+            setTimeout(() => window.location.href = 'login.html', 2000);
+        }
+    }
+</script>
+</body>
+</html>
