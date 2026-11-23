@@ -1,9 +1,21 @@
 // ============================================================================
-// AUTHENTICATION & ROLE-BASED ACCESS CONTROL (RBAC)
+// AUTHENTICATION, ROLE-BASED ACCESS CONTROL (RBAC) & APP SHELL
 // ============================================================================
 
 let currentUser = null;
 let currentProfile = null;
+
+const SECTION_TITLES = {
+    dashboardSection: "Dashboard",
+    equipmentSection: "Equipment",
+    availableEquipmentSection: "Browse Equipment",
+    requestsSection: "Borrowing Requests",
+    myRequestsSection: "My Requests",
+    myHistorySection: "My History",
+    maintenanceSection: "Maintenance",
+    usersSection: "User Management",
+    auditLogsSection: "Audit Logs"
+};
 
 /**
  * Fetch and ensure profile exists for the authenticated user
@@ -16,7 +28,7 @@ async function fetchUserProfile(user) {
             .from("profiles")
             .select("*")
             .eq("id", user.id)
-            .single();
+            .maybeSingle();
 
         if (error || !profile) {
             console.warn("Profile not found in DB, auto-creating fallback profile...");
@@ -25,18 +37,13 @@ async function fetchUserProfile(user) {
 
             const { data: newProfile, error: createError } = await supabaseClient
                 .from("profiles")
-                .upsert([{
-                    id: user.id,
-                    full_name: fullName,
-                    email: user.email,
-                    role: role
-                }])
+                .upsert([{ id: user.id, full_name: fullName, email: user.email, role }])
                 .select()
                 .single();
 
             if (createError) {
                 console.error("Error creating user profile:", createError);
-                return { id: user.id, full_name: fullName, email: user.email, role: role };
+                return { id: user.id, full_name: fullName, email: user.email, role };
             }
             profile = newProfile;
         }
@@ -54,7 +61,7 @@ async function fetchUserProfile(user) {
 }
 
 /**
- * Checks login status and enforces route/section access rules
+ * Checks login status, loads data, and opens the initial section
  */
 async function checkAuthState() {
     if (!isSupabaseReady()) return;
@@ -72,129 +79,201 @@ async function checkAuthState() {
                 return;
             }
 
-            // Apply role-based navigation UI state
             applyRoleAccessUI(currentProfile);
 
-            // Load core data (equipment records) for all authenticated roles
-            if (typeof loadEquipment === "function") {
-                await loadEquipment();
-            }
+            const fromHash = (window.location.hash || "").replace(/^#\/?/, "");
+            const initial = SECTION_TITLES[fromHash] && isSectionAllowed(fromHash, currentProfile.role) ? fromHash : "dashboardSection";
+            showSection(initial, { skipLoad: true });
 
+            await refreshAllData();
         } else {
             currentUser = null;
             currentProfile = null;
-
-            if (!isLoginPage) {
-                window.location.href = "login.html";
-            }
+            if (!isLoginPage) window.location.href = "login.html";
         }
     } catch (error) {
         console.error("Auth check failed:", error);
+        if (typeof toast === "function") toast("Unable to verify your session. Please refresh the page.", "error");
     }
 }
 
 /**
- * Update UI elements, sidebars, and access rules based on user role
+ * Load every dataset the current role can see, then render all views once.
+ */
+let refreshInFlight = null;
+let refreshQueued = null;
+
+function refreshAllData(showFeedback = false) {
+    if (!currentProfile) return Promise.resolve();
+
+    // A refresh is already running: queue exactly one more run so callers
+    // that just changed data always receive fresh results.
+    if (refreshInFlight) {
+        if (!refreshQueued) {
+            refreshQueued = refreshInFlight.then(() => {
+                refreshQueued = null;
+                return refreshAllData(showFeedback);
+            });
+        }
+        return refreshQueued;
+    }
+
+    const btn = document.getElementById("refreshBtn");
+    btn?.classList.add("spinning");
+
+    const role = currentProfile.role;
+    // Equipment + maintenance first so requests/dashboards see consistent data
+    const tasks = [loadEquipment({ silent: true }), loadRequests({ silent: true })];
+    if (role === "admin" || role === "staff") tasks.push(loadMaintenance({ silent: true }));
+    if (role === "admin") {
+        tasks.push(loadUsers({ silent: true }));
+        tasks.push(loadAuditLogs({ silent: true }));
+    }
+
+    refreshInFlight = Promise.allSettled(tasks).then(() => {
+        renderActiveSection();
+        updateNavCounts();
+        if (showFeedback) toast("Data refreshed.", "info", "Up to date");
+    }).finally(() => {
+        refreshInFlight = null;
+        btn?.classList.remove("spinning");
+    });
+
+    return refreshInFlight;
+}
+
+/** Re-render whichever section is visible from cached data. */
+function renderActiveSection() {
+    const id = window.activeSectionId || "dashboardSection";
+    switch (id) {
+        case "dashboardSection": if (typeof renderDashboard === "function") renderDashboard(); break;
+        case "equipmentSection": displayEquipmentTable(); break;
+        case "availableEquipmentSection": loadAvailableEquipmentGrid(); break;
+        case "requestsSection": displayRequests(); break;
+        case "myRequestsSection": renderMyRequests(); break;
+        case "myHistorySection": renderMyHistory(); break;
+        case "maintenanceSection": displayMaintenance(); break;
+        case "usersSection": displayUsers(); break;
+        case "auditLogsSection": displayAuditLogs(); break;
+    }
+    refreshIcons();
+}
+
+/** Sidebar badge counts */
+function updateNavCounts() {
+    const setCount = (id, n) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.textContent = n;
+        el.hidden = !n;
+    };
+    const reqs = typeof borrowingRequestRecords !== "undefined" ? borrowingRequestRecords : [];
+    const role = currentProfile?.role;
+
+    if (role === "admin") setCount("navPendingCount", reqs.filter(r => r.status === "Pending").length);
+    if (role === "staff") setCount("navPendingCount", reqs.filter(r => r.status === "Approved").length);
+    if (role === "admin" || role === "staff") {
+        const maint = typeof maintenanceRecords !== "undefined" ? maintenanceRecords : [];
+        setCount("navMaintCount", maint.filter(m => m.status === "Pending").length);
+    }
+    if (role === "requester") {
+        setCount("navMyActiveCount", reqs.filter(r => r.requester_id === currentUser?.id && ["Pending", "Approved", "Released", "Overdue"].includes(effectiveStatus(r))).length);
+    }
+}
+
+/**
+ * Update UI elements and navigation visibility based on user role
  */
 function applyRoleAccessUI(profile) {
     if (!profile) return;
 
     const role = profile.role || "requester";
-    
-    // Update user info display in header
+    const name = profile.full_name || profile.email;
+
     const userNameElem = document.getElementById("headerUserName");
     const userRoleElem = document.getElementById("headerUserRole");
-    if (userNameElem) userNameElem.textContent = profile.full_name || profile.email;
-    if (userRoleElem) userRoleElem.textContent = role.toUpperCase();
+    if (userNameElem) userNameElem.textContent = name;
+    if (userRoleElem) userRoleElem.textContent = roleLabel(role);
 
-    // Toggle nav buttons visibility based on role
-    document.querySelectorAll("[data-role-required]").forEach(elem => {
-        const requiredRoles = elem.getAttribute("data-role-required").split(",");
-        if (requiredRoles.includes(role)) {
-            elem.classList.remove("role-hidden");
-        } else {
-            elem.classList.add("role-hidden");
+    ["sidebarAvatar", "topbarAvatar"].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) {
+            el.textContent = initials(name);
+            el.className = `avatar ${id === "topbarAvatar" ? "avatar-sm" : ""} avatar-${role}`;
+            el.title = `${name} · ${roleLabel(role)}`;
         }
     });
 
-    // Ensure default section load is valid for role
-    const currentSection = window.activeSectionId || "dashboardSection";
-    if (!isSectionAllowed(currentSection, role)) {
-        showSection("dashboardSection");
-    }
+    const dateEl = document.getElementById("topbarDate");
+    if (dateEl) dateEl.textContent = new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric", year: "numeric" });
+
+    document.querySelectorAll("[data-role-required]").forEach(elem => {
+        const requiredRoles = elem.getAttribute("data-role-required").split(",");
+        elem.classList.toggle("role-hidden", !requiredRoles.includes(role));
+    });
+
+    // Default borrower name on the request form
+    const borrowerName = document.getElementById("requestBorrowerName");
+    if (borrowerName && !borrowerName.value) borrowerName.value = profile.full_name || "";
+
+    refreshIcons();
 }
 
 /**
  * Validates if the user role is authorized to view a specific UI section
  */
 function isSectionAllowed(sectionId, role) {
-    if (role === "admin") return true;
-
+    if (role === "admin") {
+        return !["availableEquipmentSection", "myRequestsSection", "myHistorySection"].includes(sectionId);
+    }
     if (role === "staff") {
-        const staffForbidden = ["usersSection", "auditLogsSection"];
-        return !staffForbidden.includes(sectionId);
+        return ["dashboardSection", "equipmentSection", "requestsSection", "maintenanceSection"].includes(sectionId);
     }
-
     if (role === "requester") {
-        const requesterAllowed = ["dashboardSection", "availableEquipmentSection", "myRequestsSection", "myHistorySection"];
-        return requesterAllowed.includes(sectionId);
+        return ["dashboardSection", "availableEquipmentSection", "myRequestsSection", "myHistorySection"].includes(sectionId);
     }
-
     return false;
 }
 
 /**
- * Global section switcher with RBAC Enforcement
+ * Global section switcher with RBAC enforcement
  */
-function showSection(sectionId) {
+function showSection(sectionId, { skipLoad = false } = {}) {
     const role = currentProfile ? currentProfile.role : "requester";
 
-    // Guard checking
     if (!isSectionAllowed(sectionId, role)) {
-        alert("Access Denied: You do not have permission to access this module.");
-        window.location.hash = "#dashboardSection";
-        return;
+        toast("You do not have permission to access this module.", "error", "Access denied");
+        sectionId = "dashboardSection";
     }
 
     window.activeSectionId = sectionId;
 
-    // Hide all sections
     document.querySelectorAll(".page-section").forEach(sec => sec.classList.add("hidden"));
+    document.getElementById(sectionId)?.classList.remove("hidden");
 
-    // Show target section
-    const target = document.getElementById(sectionId);
-    if (target) {
-        target.classList.remove("hidden");
-    }
-
-    // Update nav tab active styling
-    document.querySelectorAll(".nav-link").forEach(link => {
-        if (link.getAttribute("onclick")?.includes(sectionId)) {
-            link.classList.add("active");
-        } else {
-            link.classList.remove("active");
-        }
+    document.querySelectorAll(".nav-link[data-section]").forEach(link => {
+        link.classList.toggle("active", link.dataset.section === sectionId);
     });
 
-    // Trigger section refresh hooks
-    if (sectionId === "dashboardSection") {
-        if (typeof loadEquipment === "function") loadEquipment();
-        if (typeof renderDashboard === "function") renderDashboard();
-    }
-    if (sectionId === "equipmentSection" && typeof loadEquipment === "function") loadEquipment();
-    if (sectionId === "availableEquipmentSection") {
-        if (typeof loadEquipment === "function") loadEquipment();
-        else if (typeof loadAvailableEquipmentGrid === "function") loadAvailableEquipmentGrid();
-    }
-    if (sectionId === "requestsSection" && typeof loadRequests === "function") loadRequests();
-    if (sectionId === "myRequestsSection") {
-        if (typeof loadEquipment === "function") loadEquipment();
-        if (typeof loadMyRequests === "function") loadMyRequests();
-    }
-    if (sectionId === "myHistorySection" && typeof loadMyHistory === "function") loadMyHistory();
-    if (sectionId === "maintenanceSection" && typeof loadMaintenance === "function") loadMaintenance();
-    if (sectionId === "usersSection" && typeof loadUsers === "function") loadUsers();
-    if (sectionId === "auditLogsSection" && typeof loadAuditLogs === "function") loadAuditLogs();
+    const titleEl = document.getElementById("topbarSectionTitle");
+    if (titleEl) titleEl.textContent = SECTION_TITLES[sectionId] || "Dashboard";
+    document.title = `${SECTION_TITLES[sectionId] || "Dashboard"} · LabTrack`;
+
+    // "#/section" (not "#section") so the browser doesn't jump to the element with that id
+    if (history.replaceState) history.replaceState(null, "", `#/${sectionId}`);
+    toggleSidebar(false);
+    window.scrollTo({ top: 0 });
+
+    if (skipLoad || !currentProfile) return;
+
+    // Render immediately from cache, then refresh from the server.
+    renderActiveSection();
+    refreshAllData();
+}
+
+function toggleSidebar(force) {
+    const open = typeof force === "boolean" ? force : !document.body.classList.contains("sidebar-open");
+    document.body.classList.toggle("sidebar-open", open);
 }
 
 /**
@@ -206,62 +285,81 @@ async function logout() {
         return;
     }
 
+    const ok = await confirmDialog("Sign out?", "You will need to log in again to access the system.", { confirmText: "Sign out", variant: "danger", iconName: "log-out" });
+    if (!ok) return;
+
     try {
         if (typeof createAuditLog === "function" && currentUser) {
             await createAuditLog("LOGOUT", "Auth", currentUser.id, `User ${currentProfile?.full_name || currentUser.email} logged out.`);
         }
-
         const { error } = await supabaseClient.auth.signOut();
         if (error) console.error("Logout failed:", error);
-
-        currentUser = null;
-        currentProfile = null;
-        window.location.href = "login.html";
     } catch (error) {
         console.error("Logout error:", error);
-        window.location.href = "login.html";
     }
+    currentUser = null;
+    currentProfile = null;
+    window.location.href = "login.html";
 }
 
 window.logout = logout;
 window.showSection = showSection;
+window.toggleSidebar = toggleSidebar;
+window.refreshAllData = refreshAllData;
 
-// DOM Initialization for Login/Register Form
+// ============================================================================
+// LOGIN / REGISTER PAGE
+// ============================================================================
 document.addEventListener("DOMContentLoaded", () => {
     checkAuthState();
 
     const loginForm = document.getElementById("loginForm");
+    if (!loginForm) return;
+
     const loginMessage = document.getElementById("loginMessage");
     const authSubmitButton = document.getElementById("authSubmitButton");
     const authSwitchText = document.getElementById("authSwitchText");
     const authSwitchButton = document.getElementById("authSwitchButton");
     const fullNameGroup = document.getElementById("fullNameGroup");
     const roleSelectGroup = document.getElementById("roleSelectGroup");
+    const authTitle = document.getElementById("authTitle");
+    const authSubtitle = document.getElementById("authSubtitle");
     let isRegisterMode = false;
 
-    if (!loginForm) return;
+    const setMessage = (text, type = "") => {
+        loginMessage.textContent = text;
+        loginMessage.className = `login-message ${type ? type + "-message" : ""}`;
+    };
 
-    if (authSwitchButton) {
-        authSwitchButton.addEventListener("click", () => {
-            isRegisterMode = !isRegisterMode;
-            authSubmitButton.textContent = isRegisterMode ? "Create Account" : "Login";
-            authSwitchText.textContent = isRegisterMode ? "Already have an account?" : "Don't have an account?";
-            authSwitchButton.textContent = isRegisterMode ? "Login instead" : "Create one";
-            loginMessage.textContent = "";
+    authSwitchButton?.addEventListener("click", () => {
+        isRegisterMode = !isRegisterMode;
+        authSubmitButton.textContent = isRegisterMode ? "Create Account" : "Sign In";
+        authSwitchText.textContent = isRegisterMode ? "Already have an account?" : "Don't have an account?";
+        authSwitchButton.textContent = isRegisterMode ? "Sign in instead" : "Create one";
+        if (authTitle) authTitle.textContent = isRegisterMode ? "Create your account" : "Welcome back";
+        if (authSubtitle) authSubtitle.textContent = isRegisterMode ? "Register to start borrowing laboratory equipment" : "Sign in to continue to LabTrack";
+        setMessage("");
+        if (fullNameGroup) fullNameGroup.style.display = isRegisterMode ? "block" : "none";
+        if (roleSelectGroup) roleSelectGroup.style.display = isRegisterMode ? "block" : "none";
+        document.getElementById("fullName").required = isRegisterMode;
+    });
 
-            if (fullNameGroup) fullNameGroup.style.display = isRegisterMode ? "block" : "none";
-            if (roleSelectGroup) roleSelectGroup.style.display = isRegisterMode ? "block" : "none";
+    // Demo account quick-fill buttons
+    document.querySelectorAll("[data-demo-email]").forEach(btn => {
+        btn.addEventListener("click", () => {
+            document.getElementById("email").value = btn.dataset.demoEmail;
+            document.getElementById("password").value = btn.dataset.demoPassword;
+            if (isRegisterMode) authSwitchButton.click();
+            setMessage(`Demo credentials filled for ${btn.dataset.demoLabel}. Click Sign In.`, "info");
         });
-    }
+    });
 
     loginForm.addEventListener("submit", async (event) => {
         event.preventDefault();
-        loginMessage.textContent = "";
-        loginMessage.className = "login-message";
+        setMessage("");
 
         if (!isSupabaseReady()) {
-            loginMessage.textContent = "Supabase is not configured properly.";
-            loginMessage.classList.add("error-message");
+            setMessage("Supabase is not configured properly.", "error");
             return;
         }
 
@@ -270,64 +368,59 @@ document.addEventListener("DOMContentLoaded", () => {
         const fullName = isRegisterMode ? document.getElementById("fullName").value.trim() : "";
         const role = isRegisterMode ? document.getElementById("registerRole").value : "requester";
 
-        loginMessage.textContent = isRegisterMode ? "Creating account..." : "Logging in...";
+        if (isRegisterMode && !fullName) {
+            setMessage("Please enter your full name.", "error");
+            return;
+        }
+        if (isRegisterMode && password.length < 8) {
+            setMessage("Password must be at least 8 characters.", "error");
+            return;
+        }
+
+        authSubmitButton.disabled = true;
+        setMessage(isRegisterMode ? "Creating account..." : "Signing in...", "info");
 
         try {
             if (isRegisterMode) {
                 const { data, error } = await supabaseClient.auth.signUp({
                     email,
                     password,
-                    options: {
-                        data: {
-                            full_name: fullName,
-                            role: role
-                        }
-                    }
+                    options: { data: { full_name: fullName, role } }
                 });
 
                 if (error) {
-                    loginMessage.textContent = error.message;
-                    loginMessage.classList.add("error-message");
+                    setMessage(error.message, "error");
                     return;
                 }
 
-                if (data.user) {
-                    // Create explicit profile entry
-                    await supabaseClient.from("profiles").upsert({
-                        id: data.user.id,
-                        full_name: fullName,
-                        email: email,
-                        role: role
-                    });
-
-                    loginMessage.textContent = "Account created successfully! Redirecting...";
-                    loginMessage.classList.add("success-message");
-                    setTimeout(() => { window.location.href = "index.html"; }, 1000);
+                if (data.user && data.session) {
+                    await supabaseClient.from("profiles").upsert({ id: data.user.id, full_name: fullName, email, role });
+                    setMessage("Account created successfully! Redirecting...", "success");
+                    setTimeout(() => { window.location.href = "index.html"; }, 900);
+                } else {
+                    setMessage("Account created. Please check your email to confirm your account, then sign in.", "success");
                 }
             } else {
                 const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
 
                 if (error) {
-                    loginMessage.textContent = error.message;
-                    loginMessage.classList.add("error-message");
+                    setMessage(error.message === "Invalid login credentials" ? "Incorrect email or password." : error.message, "error");
                     return;
                 }
 
-                const user = data.user;
-                const profile = await fetchUserProfile(user);
+                const profile = await fetchUserProfile(data.user);
+                currentUser = data.user;
+                currentProfile = profile;
+                await createAuditLog("LOGIN", "Auth", data.user.id, `User ${profile?.full_name || email} logged in.`);
 
-                if (typeof createAuditLog === "function") {
-                    await createAuditLog("LOGIN", "Auth", user.id, `User ${profile?.full_name || email} logged in.`);
-                }
-
-                loginMessage.textContent = "Login successful! Redirecting...";
-                loginMessage.classList.add("success-message");
-                setTimeout(() => { window.location.href = "index.html"; }, 800);
+                setMessage("Login successful! Redirecting...", "success");
+                setTimeout(() => { window.location.href = "index.html"; }, 600);
             }
         } catch (err) {
             console.error(err);
-            loginMessage.textContent = "Authentication error occurred.";
-            loginMessage.classList.add("error-message");
+            setMessage("Authentication error occurred. Please try again.", "error");
+        } finally {
+            authSubmitButton.disabled = false;
         }
     });
 });

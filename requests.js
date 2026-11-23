@@ -4,118 +4,138 @@
 
 let borrowingRequestRecords = [];
 
+const ACTIVE_STATUSES = ["Pending", "Approved", "Released", "Overdue"];
+const HISTORY_STATUSES = ["Returned", "Closed", "Rejected", "Cancelled"];
+
+const REQUEST_SELECT_FULL = `
+    *,
+    equipment ( name, equipment_code, category, status, quantity, available_quantity, location ),
+    approver:profiles!borrowing_requests_approved_by_fkey ( full_name ),
+    releaser:profiles!borrowing_requests_released_by_fkey ( full_name ),
+    receiver:profiles!borrowing_requests_returned_by_fkey ( full_name )
+`;
+const REQUEST_SELECT_BASIC = `*, equipment ( name, equipment_code, category, status, quantity, available_quantity, location )`;
+
 /**
- * Load borrowing requests from Supabase
+ * Load borrowing requests (RLS limits Requesters to their own rows)
  */
-async function loadRequests() {
+async function loadRequests({ silent = false } = {}) {
     if (!isSupabaseReady()) return;
 
-    const { data, error } = await supabaseClient
+    let { data, error } = await supabaseClient
         .from("borrowing_requests")
-        .select(`
-            *,
-            equipment (
-                name,
-                equipment_code,
-                category,
-                status,
-                available_quantity
-            )
-        `)
+        .select(REQUEST_SELECT_FULL)
         .order("id", { ascending: false });
 
     if (error) {
+        // Fallback in case foreign key names differ in this database
+        ({ data, error } = await supabaseClient
+            .from("borrowing_requests")
+            .select(REQUEST_SELECT_BASIC)
+            .order("id", { ascending: false }));
+    }
+
+    if (error) {
         console.error("Error loading borrowing requests:", error.message);
+        if (!silent) toast("Could not load borrowing requests: " + error.message, "error");
         return;
     }
 
     borrowingRequestRecords = data || [];
-    updateOverdueStatusInDB();
+    await markOverdueInDB();
+
     displayRequests();
-    if (typeof renderDashboard === "function") renderDashboard();
+    renderMyRequests();
+    renderMyHistory();
+}
+
+/** A Released request past its due date is Overdue, even before the DB is updated */
+function effectiveStatus(req) {
+    if (req.status === "Released" && req.expected_return_date && daysUntil(req.expected_return_date) < 0) return "Overdue";
+    return req.status;
 }
 
 /**
- * Automatic Overdue Check
+ * Automatic overdue update (Admin & Staff only; Requesters cannot update rows)
  */
-async function updateOverdueStatusInDB() {
-    const todayStr = new Date().toISOString().split("T")[0];
+async function markOverdueInDB() {
+    const role = currentProfile?.role;
+    if (role !== "admin" && role !== "staff") return;
 
-    for (const req of borrowingRequestRecords) {
-        if (req.status === "Released" && req.expected_return_date < todayStr) {
-            const { error } = await supabaseClient
-                .from("borrowing_requests")
-                .update({ status: "Overdue" })
-                .eq("id", req.id);
+    const ids = borrowingRequestRecords.filter(r => r.status === "Released" && effectiveStatus(r) === "Overdue").map(r => r.id);
+    if (ids.length === 0) return;
 
-            if (!error) req.status = "Overdue";
-        }
-    }
-}
-
-/**
- * Load requests specific to current user (Requester view: My Requests & My History)
- */
-async function loadMyRequests() {
-    if (!currentUser) return;
-
-    const { data, error } = await supabaseClient
+    const { error } = await supabaseClient
         .from("borrowing_requests")
-        .select(`*, equipment (name, equipment_code)`)
-        .eq("requester_id", currentUser.id)
-        .in("status", ["Pending", "Approved", "Released", "Overdue"])
-        .order("id", { ascending: false });
+        .update({ status: "Overdue" })
+        .in("id", ids)
+        .eq("status", "Released");
 
-    if (error) {
-        console.error("Error loading my requests:", error.message);
-        return;
+    if (!error) {
+        borrowingRequestRecords.forEach(r => { if (ids.includes(r.id)) r.status = "Overdue"; });
+    } else {
+        console.warn("Overdue update skipped:", error.message);
     }
-
-    renderMyRequestsTable("myRequestsTableBody", data || []);
 }
 
-async function loadMyHistory() {
-    if (!currentUser) return;
+// Kept for compatibility with older calls
+async function loadMyRequests() { await loadRequests({ silent: true }); }
+async function loadMyHistory() { await loadRequests({ silent: true }); }
 
-    const { data, error } = await supabaseClient
-        .from("borrowing_requests")
-        .select(`*, equipment (name, equipment_code)`)
-        .eq("requester_id", currentUser.id)
-        .in("status", ["Returned", "Closed", "Rejected"])
-        .order("id", { ascending: false });
-
-    if (error) {
-        console.error("Error loading my history:", error.message);
-        return;
-    }
-
-    renderMyRequestsTable("myHistoryTableBody", data || []);
+function myRequests() {
+    return borrowingRequestRecords.filter(r => r.requester_id === currentUser?.id);
 }
 
-function renderMyRequestsTable(targetId, records) {
+function renderMyRequests() {
+    const rows = myRequests().filter(r => ACTIVE_STATUSES.includes(effectiveStatus(r)));
+    renderMyRequestsTable("myRequestsTableBody", rows, true);
+}
+
+function renderMyHistory() {
+    const rows = myRequests().filter(r => HISTORY_STATUSES.includes(r.status));
+    renderMyRequestsTable("myHistoryTableBody", rows, false);
+}
+
+function renderMyRequestsTable(targetId, records, isActive) {
     const tbody = document.getElementById(targetId);
     if (!tbody) return;
 
-    tbody.innerHTML = "";
-
     if (records.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="7" class="empty-cell">No requests found.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="7" class="empty-cell">${icon(isActive ? "inbox" : "history")}<p>${isActive ? "You have no active requests. Browse equipment to submit one." : "No completed transactions yet."}</p></td></tr>`;
+        refreshIcons();
         return;
     }
 
-    records.forEach(item => {
-        const row = document.createElement("tr");
-        row.innerHTML = `
-            <td>#${item.id}</td>
-            <td><strong>${escapeHTML(item.equipment?.name || "Equipment")}</strong><br><small>${escapeHTML(item.equipment?.equipment_code || "")}</small></td>
-            <td>${item.quantity}</td>
-            <td>${escapeHTML(item.purpose)}</td>
-            <td>${item.request_date}</td>
-            <td>${item.expected_return_date}</td>
-            <td><span class="badge ${getStatusBadgeClass(item.status)}">${item.status}</span></td>
-        `;
-        tbody.appendChild(row);
-    });
+    tbody.innerHTML = records.map(item => {
+        const status = effectiveStatus(item);
+        let action = `<button class="btn-icon" title="View details" onclick="showRequestDetails(${item.id})">${icon("eye")}</button>`;
+        if (isActive && status === "Pending") {
+            action = `<button class="btn-action btn-outline-danger" onclick="cancelRequest(${item.id}, this)">${icon("x")}Cancel</button>` + action;
+        }
+        return `
+            <tr>
+                <td><strong>#${item.id}</strong><small class="block text-muted">${formatDate(item.request_date)}</small></td>
+                <td><strong>${escapeHTML(item.equipment?.name || "Equipment")}</strong><small class="block"><code>${escapeHTML(item.equipment?.equipment_code || "")}</code></small></td>
+                <td>${item.quantity}</td>
+                <td class="cell-wrap">${escapeHTML(item.purpose)}</td>
+                <td>${periodCell(item, status)}</td>
+                <td>${requestStatusBadge(status)}</td>
+                <td class="text-right nowrap">${action}</td>
+            </tr>`;
+    }).join("");
+    refreshIcons();
+}
+
+function periodCell(req, status) {
+    let due = "";
+    if (status === "Released" || status === "Overdue") {
+        const cls = status === "Overdue" ? "text-danger" : daysUntil(req.expected_return_date) <= 1 ? "text-warning" : "text-muted";
+        due = `<small class="block ${cls}">${dueLabel(req.expected_return_date)}</small>`;
+    } else if (status === "Approved" && daysUntil(req.expected_return_date) < 0) {
+        due = `<small class="block text-warning">Return date has passed - not yet released</small>`;
+    }
+    const returned = req.actual_return_date ? `<small class="block text-muted">Returned ${formatDate(req.actual_return_date)}</small>` : "";
+    return `${formatDate(req.request_date)} → ${formatDate(req.expected_return_date)}${due}${returned}`;
 }
 
 /**
@@ -125,82 +145,88 @@ function displayRequests() {
     const tableBody = document.getElementById("requestsTableBody");
     if (!tableBody) return;
 
-    const search = document.getElementById("requestSearch")?.value.toLowerCase() || "";
+    renderRequestStatusTabs();
+
+    const search = document.getElementById("requestSearch")?.value.toLowerCase().trim() || "";
     const statusFilter = document.getElementById("requestStatusFilter")?.value || "All";
 
     const filtered = borrowingRequestRecords.filter(req => {
-        const text = `${req.borrower_name} ${req.borrower_type} ${req.department} ${req.equipment?.name} ${req.equipment?.equipment_code} ${req.purpose}`.toLowerCase();
-        const matchesSearch = text.includes(search);
-        const matchesStatus = statusFilter === "All" || req.status === statusFilter;
-        return matchesSearch && matchesStatus;
+        const text = `#${req.id} ${req.borrower_name} ${req.borrower_type} ${req.department} ${req.equipment?.name} ${req.equipment?.equipment_code} ${req.purpose}`.toLowerCase();
+        return text.includes(search) && (statusFilter === "All" || effectiveStatus(req) === statusFilter);
     });
 
-    tableBody.innerHTML = "";
+    const footer = document.getElementById("requestsTableFooter");
+    if (footer) footer.textContent = `Showing ${filtered.length} of ${borrowingRequestRecords.length} requests`;
 
     if (filtered.length === 0) {
-        tableBody.innerHTML = `<tr><td colspan="10" class="empty-cell">No borrowing requests found.</td></tr>`;
+        tableBody.innerHTML = `<tr><td colspan="7" class="empty-cell">${icon("inbox")}<p>No borrowing requests match your filters.</p></td></tr>`;
+        refreshIcons();
         return;
     }
 
-    const userRole = currentProfile ? currentProfile.role : "requester";
+    tableBody.innerHTML = filtered.map(req => {
+        const status = effectiveStatus(req);
+        return `
+            <tr>
+                <td class="nowrap"><strong>#${req.id}</strong><small class="block text-muted">${timeAgo(req.created_at)}</small></td>
+                <td>
+                    <div class="cell-person">
+                        <span class="avatar avatar-xs">${initials(req.borrower_name)}</span>
+                        <div><strong>${escapeHTML(req.borrower_name)}</strong><small class="block text-muted">${escapeHTML(req.borrower_type)} · ${escapeHTML(req.department)}</small></div>
+                    </div>
+                </td>
+                <td><strong>${escapeHTML(req.equipment?.name || "")}</strong><small class="block"><code>${escapeHTML(req.equipment?.equipment_code || "")}</code></small></td>
+                <td>${req.quantity}</td>
+                <td>${periodCell(req, status)}</td>
+                <td>${requestStatusBadge(status)}</td>
+                <td class="text-right nowrap">${requestActionButtons(req)}<button class="btn-icon" title="View details" onclick="showRequestDetails(${req.id})">${icon("eye")}</button></td>
+            </tr>`;
+    }).join("");
 
-    filtered.forEach(req => {
-        const row = document.createElement("tr");
+    refreshIcons();
+}
 
-        let actionButtons = "";
+/** Role-aware action buttons for a request row (also used by dashboards) */
+function requestActionButtons(req) {
+    const role = currentProfile?.role;
+    const status = effectiveStatus(req);
 
-        // Admin Approval Buttons (BR-A4-03)
-        if (userRole === "admin") {
-            if (req.status === "Pending") {
-                actionButtons = `
-                    <button class="btn-action btn-approve" onclick="approveRequest(${req.id})">Approve</button>
-                    <button class="btn-action btn-reject" onclick="rejectRequest(${req.id})">Reject</button>
-                `;
-            } else if (req.status === "Approved") {
-                actionButtons = `
-                    <button class="btn-action btn-release" onclick="releaseEquipment(${req.id})">Release</button>
-                `;
-            } else if (req.status === "Released" || req.status === "Overdue") {
-                actionButtons = `
-                    <button class="btn-action btn-return" onclick="processReturn(${req.id})">Process Return</button>
-                `;
-            } else {
-                actionButtons = `<span class="text-muted">Completed</span>`;
-            }
-        } else if (userRole === "staff") {
-            // Staff can release approved items or process returns, but CANNOT approve or reject
-            if (req.status === "Approved") {
-                actionButtons = `
-                    <button class="btn-action btn-release" onclick="releaseEquipment(${req.id})">Release</button>
-                `;
-            } else if (req.status === "Released" || req.status === "Overdue") {
-                actionButtons = `
-                    <button class="btn-action btn-return" onclick="processReturn(${req.id})">Process Return</button>
-                `;
-            } else if (req.status === "Pending") {
-                actionButtons = `<span class="badge badge-warning">Awaiting Admin Review</span>`;
-            } else {
-                actionButtons = `<span class="text-muted">Completed</span>`;
-            }
-        } else {
-            actionButtons = `<span class="text-muted">No Actions</span>`;
+    if (role === "admin") {
+        if (status === "Pending") {
+            return `<button class="btn-action btn-approve" onclick="approveRequest(${req.id}, this)">${icon("check")}Approve</button>
+                    <button class="btn-action btn-reject" onclick="rejectRequest(${req.id}, this)">${icon("x")}Reject</button>`;
         }
+    }
+    if (role === "admin" || role === "staff") {
+        if (status === "Approved") return `<button class="btn-action btn-release" onclick="releaseEquipment(${req.id}, this)">${icon("package-check")}Release</button>`;
+        if (status === "Released" || status === "Overdue") return `<button class="btn-action btn-return" onclick="processReturn(${req.id}, this)">${icon("undo-2")}Return</button>`;
+        if (status === "Pending" && role === "staff") return `<span class="text-muted small">Awaiting admin</span>`;
+    }
+    return "";
+}
 
-        row.innerHTML = `
-            <td>#${req.id}</td>
-            <td><strong>${escapeHTML(req.borrower_name)}</strong><br><small>${escapeHTML(req.borrower_type)} (${escapeHTML(req.department)})</small></td>
-            <td><strong>${escapeHTML(req.equipment?.name || "")}</strong><br><small>${escapeHTML(req.equipment?.equipment_code || "")}</small></td>
-            <td>${req.quantity}</td>
-            <td>${escapeHTML(req.purpose)}</td>
-            <td>${req.request_date}</td>
-            <td>${req.expected_return_date}</td>
-            <td>${req.actual_return_date || "-"}</td>
-            <td><span class="badge ${getStatusBadgeClass(req.status)}">${req.status}</span></td>
-            <td>${actionButtons}</td>
-        `;
+function renderRequestStatusTabs() {
+    const el = document.getElementById("requestStatusTabs");
+    if (!el) return;
+    const current = document.getElementById("requestStatusFilter")?.value || "All";
+    const tabs = ["All", "Pending", "Approved", "Released", "Overdue", "Returned", "Rejected", "Cancelled"];
+    el.innerHTML = tabs.map(t => {
+        const n = t === "All" ? borrowingRequestRecords.length : borrowingRequestRecords.filter(r => effectiveStatus(r) === t).length;
+        return `<button class="status-tab ${t === current ? "active" : ""} ${t === "Overdue" && n ? "has-alert" : ""}" onclick="setRequestFilter('${t}')">${t}<span>${n}</span></button>`;
+    }).join("");
+}
 
-        tableBody.appendChild(row);
-    });
+function setRequestFilter(status) {
+    const sel = document.getElementById("requestStatusFilter");
+    if (sel) sel.value = status;
+    displayRequests();
+}
+
+/** Open the requests page pre-filtered (used by dashboard links) */
+function openRequestsFiltered(status) {
+    const sel = document.getElementById("requestStatusFilter");
+    if (sel) sel.value = status;
+    showSection("requestsSection");
 }
 
 /**
@@ -210,286 +236,393 @@ async function submitBorrowingRequest(event) {
     event.preventDefault();
 
     if (!currentUser) {
-        alert("You must be logged in to submit a request.");
+        toast("You must be logged in to submit a request.", "error");
         return;
     }
 
     const equipmentId = document.getElementById("requestEquipmentSelect").value;
-    const quantity = parseInt(document.getElementById("requestQuantity").value, 10) || 1;
+    const quantity = parseInt(document.getElementById("requestQuantity").value, 10);
     const purpose = document.getElementById("requestPurpose").value.trim();
     const expectedReturnDate = document.getElementById("requestExpectedReturnDate").value;
     const borrowerName = document.getElementById("requestBorrowerName")?.value.trim() || currentProfile?.full_name || "Borrower";
     const borrowerType = document.getElementById("requestBorrowerType")?.value || "Student";
-    const department = document.getElementById("requestDepartment")?.value || "BSIT";
+    const department = document.getElementById("requestDepartment")?.value.trim() || "BSIT";
 
-    if (!equipmentId) {
-        alert("Please select equipment.");
-        return;
+    if (!equipmentId) return toast("Please select the equipment you want to borrow.", "warning");
+    if (!Number.isInteger(quantity) || quantity < 1) return toast("Quantity must be at least 1.", "warning");
+    if (!purpose) return toast("Please describe the purpose of borrowing.", "warning");
+    if (!expectedReturnDate) return toast("Please choose an expected return date.", "warning");
+
+    const today = todayStr();
+    if (expectedReturnDate < today) return toast("Expected return date cannot be in the past.", "warning");
+    if (daysUntil(expectedReturnDate) > 30) return toast("Borrowing period cannot exceed 30 days.", "warning");
+
+    const alreadyPending = myRequests().find(r => String(r.equipment_id) === String(equipmentId) && ["Pending", "Approved"].includes(r.status));
+    if (alreadyPending) {
+        return toast(`You already have request #${alreadyPending.id} (${alreadyPending.status}) for this equipment.`, "warning", "Duplicate request");
     }
 
-    const today = new Date().toISOString().split("T")[0];
-    if (expectedReturnDate < today) {
-        alert("Expected return date cannot be in the past.");
-        return;
+    const btn = document.getElementById("requestSubmitBtn");
+    await withBusy(btn, async () => {
+        const { data: equip, error: equipErr } = await supabaseClient.from("equipment").select("*").eq("id", equipmentId).single();
+        if (equipErr || !equip) return toast("Unable to fetch equipment details.", "error");
+
+        // BR-A4-09: Equipment under maintenance cannot be borrowed
+        if (equip.status === "Maintenance") return toast("This equipment is under maintenance and cannot be borrowed.", "warning", "Unavailable");
+        // BR-A4-01: Only available equipment may be requested
+        if (equip.status === "Damaged" || equip.available_quantity < quantity) {
+            return toast(`Only ${equip.available_quantity} unit(s) of ${equip.name} are available right now.`, "warning", "Insufficient stock");
+        }
+
+        const { data: newReq, error: insertErr } = await supabaseClient
+            .from("borrowing_requests")
+            .insert([{
+                requester_id: currentUser.id,
+                borrower_name: borrowerName,
+                borrower_type: borrowerType,
+                department,
+                equipment_id: Number(equipmentId),
+                quantity,
+                purpose,
+                request_date: today,
+                expected_return_date: expectedReturnDate,
+                status: "Pending"
+            }])
+            .select()
+            .single();
+
+        if (insertErr) return toast("Failed to submit request: " + friendlyDbError(insertErr), "error");
+
+        await createAuditLog("CREATED", "Borrowing", newReq.id, `Submitted borrowing request for ${quantity} x ${equip.name} (${equip.equipment_code})`);
+        toast(`Request #${newReq.id} was submitted and is waiting for administrator approval.`, "success", "Request submitted");
+
+        const form = document.getElementById("borrowingRequestForm");
+        form?.reset();
+        document.getElementById("requestBorrowerName").value = currentProfile?.full_name || "";
+        setDefaultReturnDate();
+        await refreshAllData();
+    });
+}
+
+/**
+ * Update a request, dropping the optional `remarks` column if this database doesn't have it yet.
+ * Returns { data, error } where data is the updated rows.
+ */
+async function updateRequestRow(id, payload, extraFilter) {
+    const run = async (p) => {
+        let q = supabaseClient.from("borrowing_requests").update(p).eq("id", id);
+        if (extraFilter) q = q.eq(extraFilter[0], extraFilter[1]);
+        return await q.select("id");
+    };
+    let res = await run(payload);
+    if (res.error && "remarks" in payload && /remarks/i.test(res.error.message)) {
+        const { remarks, ...rest } = payload;
+        res = await run(rest);
     }
-
-    // Fetch equipment details to check availability & maintenance status
-    const { data: equip, error: equipErr } = await supabaseClient
-        .from("equipment")
-        .select("*")
-        .eq("id", equipmentId)
-        .single();
-
-    if (equipErr || !equip) {
-        alert("Unable to fetch equipment details.");
-        return;
-    }
-
-    // BR-A4-09: Equipment under maintenance cannot be borrowed
-    if (equip.status === "Maintenance") {
-        alert("Maintenance: This equipment is under maintenance and cannot be borrowed.");
-        return;
-    }
-
-    // BR-A4-01: Only available equipment may be requested
-    if (equip.status === "Damaged" || equip.available_quantity < quantity) {
-        alert("Equipment unavailable: This equipment is currently unavailable or insufficient quantity.");
-        return;
-    }
-
-    // Insert new pending borrowing request
-    const { data: newReq, error: insertErr } = await supabaseClient
-        .from("borrowing_requests")
-        .insert([{
-            requester_id: currentUser.id,
-            borrower_name: borrowerName,
-            borrower_type: borrowerType,
-            department: department,
-            equipment_id: equipmentId,
-            quantity: quantity,
-            purpose: purpose,
-            request_date: today,
-            expected_return_date: expectedReturnDate,
-            status: "Pending"
-        }])
-        .select()
-        .single();
-
-    if (insertErr) {
-        alert("Failed to submit borrowing request: " + insertErr.message);
-        return;
-    }
-
-    // Audit Log (BR-A4-10)
-    await createAuditLog("CREATED", "Borrowing", newReq.id, `Submitted borrowing request for ${equip.name} (${equip.equipment_code})`);
-
-    alert("Borrowing request submitted successfully! Status is set to Pending for Administrator review.");
-
-    document.getElementById("borrowingRequestForm")?.reset();
-    await loadRequests();
-    await loadMyRequests();
+    return res;
 }
 
 /**
  * APPROVE BORROWING REQUEST (BR-A4-02, BR-A4-03)
  */
-async function approveRequest(requestId) {
+async function approveRequest(requestId, btn) {
     if (!currentProfile || currentProfile.role !== "admin") {
-        alert("Unauthorized: Only Administrator may approve or reject requests.");
-        return;
+        return toast("Only an Administrator may approve or reject requests.", "error", "Unauthorized");
     }
 
     const req = borrowingRequestRecords.find(r => r.id === requestId);
     if (!req) return;
 
-    // BR-A4-02: Staff cannot approve their own request
+    // BR-A4-02: Approver cannot approve their own request
     if (req.requester_id === currentUser.id) {
-        alert("Unauthorized: You cannot approve your own borrowing request.");
-        return;
+        return toast("You cannot approve your own borrowing request.", "error", "Not allowed");
     }
 
-    if (!confirm(`Are you sure you want to APPROVE request #${requestId} for ${req.equipment?.name}?`)) return;
+    const equip = equipmentRecords.find(e => e.id === req.equipment_id);
+    const stockNote = equip && (equip.available_quantity < req.quantity || equip.status !== "Available")
+        ? ` Note: only ${equip.available_quantity} unit(s) are available now (status: ${equip.status}). It can be released once stock is available.`
+        : "";
 
-    const { error } = await supabaseClient
-        .from("borrowing_requests")
-        .update({
+    const ok = await confirmDialog(`Approve request #${requestId}?`,
+        `${req.borrower_name} will be allowed to borrow ${req.quantity} x ${req.equipment?.name} until ${formatDate(req.expected_return_date)}.${stockNote}`,
+        { confirmText: "Approve", variant: "success", iconName: "check" });
+    if (!ok) return;
+
+    await withBusy(btn, async () => {
+        const { data, error } = await updateRequestRow(requestId, {
             status: "Approved",
             approved_by: currentUser.id,
             approved_at: new Date().toISOString()
-        })
-        .eq("id", requestId);
+        }, ["status", "Pending"]);
 
-    if (error) {
-        alert("Failed to approve request: " + error.message);
-        return;
-    }
+        if (error) return toast("Failed to approve request: " + friendlyDbError(error), "error");
+        if (!data?.length) return toast("This request is no longer pending. The list has been refreshed.", "warning");
 
-    // Audit Log (BR-A4-10)
-    await createAuditLog("APPROVED", "Borrowing", requestId, `Approved borrowing request for ${req.equipment?.name}`);
-
-    alert(`Request #${requestId} approved successfully!`);
-    await loadRequests();
+        await createAuditLog("APPROVED", "Borrowing", requestId, `Approved borrowing request of ${req.borrower_name} for ${req.equipment?.name}`);
+        toast(`Request #${requestId} approved. Staff can now release the equipment.`, "success", "Approved");
+        await refreshAllData();
+    });
 }
 
 /**
  * REJECT BORROWING REQUEST (BR-A4-03)
  */
-async function rejectRequest(requestId) {
+async function rejectRequest(requestId, btn) {
     if (!currentProfile || currentProfile.role !== "admin") {
-        alert("Unauthorized: Only Administrator may approve or reject requests.");
-        return;
+        return toast("Only an Administrator may approve or reject requests.", "error", "Unauthorized");
     }
 
     const req = borrowingRequestRecords.find(r => r.id === requestId);
     if (!req) return;
 
-    if (!confirm(`Are you sure you want to REJECT request #${requestId}?`)) return;
+    const result = await openModal({
+        title: `Reject request #${requestId}?`,
+        message: `${req.borrower_name} · ${req.quantity} x ${req.equipment?.name}`,
+        fields: [{ name: "reason", label: "Reason for rejection", type: "textarea", required: true, placeholder: "e.g. Equipment reserved for a scheduled laboratory class" }],
+        confirmText: "Reject request",
+        variant: "danger",
+        iconName: "x"
+    });
+    if (!result) return;
 
-    const { error } = await supabaseClient
-        .from("borrowing_requests")
-        .update({
+    await withBusy(btn, async () => {
+        const { data, error } = await updateRequestRow(requestId, {
             status: "Rejected",
             approved_by: currentUser.id,
-            approved_at: new Date().toISOString()
-        })
-        .eq("id", requestId);
+            approved_at: new Date().toISOString(),
+            remarks: result.reason
+        }, ["status", "Pending"]);
 
-    if (error) {
-        alert("Failed to reject request: " + error.message);
-        return;
-    }
+        if (error) return toast("Failed to reject request: " + friendlyDbError(error), "error");
+        if (!data?.length) return toast("This request is no longer pending. The list has been refreshed.", "warning");
 
-    // Audit Log (BR-A4-10)
-    await createAuditLog("REJECTED", "Borrowing", requestId, `Rejected borrowing request for ${req.equipment?.name}`);
-
-    alert(`Request #${requestId} has been rejected.`);
-    await loadRequests();
+        await createAuditLog("REJECTED", "Borrowing", requestId, `Rejected borrowing request of ${req.borrower_name} for ${req.equipment?.name}. Reason: ${result.reason}`);
+        toast(`Request #${requestId} has been rejected.`, "info", "Rejected");
+        await refreshAllData();
+    });
 }
 
 /**
  * RELEASE EQUIPMENT (BR-A4-04, BR-A4-05, BR-A4-07)
  */
-async function releaseEquipment(requestId) {
+async function releaseEquipment(requestId, btn) {
+    const role = currentProfile?.role;
+    if (role !== "admin" && role !== "staff") return toast("Only Admin or Staff can release equipment.", "error", "Unauthorized");
+
     const req = borrowingRequestRecords.find(r => r.id === requestId);
     if (!req) return;
 
-    // BR-A4-07 & BR-A4-04: Rejected or Pending requests cannot be released
-    if (req.status === "Rejected") {
-        alert("Rejected release: Rejected requests cannot be released.");
-        return;
-    }
+    if (req.status === "Rejected") return toast("Rejected requests cannot be released.", "warning");
+    if (req.status !== "Approved") return toast("Only approved requests can be released.", "warning");
 
-    if (req.status !== "Approved") {
-        alert("Invalid release: Only approved requests can be released.");
-        return;
-    }
+    const ok = await confirmDialog(`Release equipment for #${requestId}?`,
+        `Hand over ${req.quantity} x ${req.equipment?.name} to ${req.borrower_name}. Due back ${formatDate(req.expected_return_date)}.`,
+        { confirmText: "Release", variant: "primary", iconName: "package-check" });
+    if (!ok) return;
 
-    if (!confirm(`Confirm releasing equipment "${req.equipment?.name}" to ${req.borrower_name}?`)) return;
+    await withBusy(btn, async () => {
+        // Always check live stock before releasing
+        const { data: equip, error: eqErr } = await supabaseClient.from("equipment").select("*").eq("id", req.equipment_id).single();
+        if (eqErr || !equip) return toast("Unable to read current equipment stock.", "error");
+        if (equip.status === "Maintenance" || equip.status === "Damaged") {
+            return toast(`${equip.name} is currently ${equip.status.toLowerCase()} and cannot be released.`, "warning", "Unavailable");
+        }
+        if (equip.available_quantity < req.quantity) {
+            return toast(`Only ${equip.available_quantity} unit(s) are in stock; ${req.quantity} requested.`, "warning", "Insufficient stock");
+        }
 
-    // 1. Update Request Status to Released
-    const { error: reqErr } = await supabaseClient
-        .from("borrowing_requests")
-        .update({
+        const { data, error: reqErr } = await updateRequestRow(requestId, {
             status: "Released",
             released_by: currentUser.id,
             released_at: new Date().toISOString()
-        })
-        .eq("id", requestId);
+        }, ["status", "Approved"]);
 
-    if (reqErr) {
-        alert("Failed to update request: " + reqErr.message);
-        return;
-    }
+        if (reqErr) return toast("Failed to update request: " + friendlyDbError(reqErr), "error");
+        if (!data?.length) return toast("This request is no longer approved. The list has been refreshed.", "warning");
 
-    // 2. BR-A4-05: Update Equipment available quantity & status
-    const newAvailQty = Math.max(0, (req.equipment?.available_quantity || 1) - req.quantity);
-    const newStatus = newAvailQty === 0 ? "Borrowed" : "Available";
+        // BR-A4-05: Deduct stock
+        const newAvailQty = equip.available_quantity - req.quantity;
+        const { error: equipErr } = await supabaseClient
+            .from("equipment")
+            .update({ available_quantity: newAvailQty, status: newAvailQty === 0 ? "Borrowed" : "Available" })
+            .eq("id", req.equipment_id);
 
-    const { error: equipErr } = await supabaseClient
-        .from("equipment")
-        .update({
-            available_quantity: newAvailQty,
-            status: newStatus
-        })
-        .eq("id", req.equipment_id);
+        if (equipErr) console.error("Equipment update warning:", equipErr.message);
 
-    if (equipErr) {
-        console.error("Equipment update warning:", equipErr.message);
-    }
-
-    // Audit Log (BR-A4-10)
-    await createAuditLog("RELEASED", "Borrowing", requestId, `Released equipment ${req.equipment?.name} to ${req.borrower_name}`);
-
-    alert(`Equipment released successfully!`);
-    await loadEquipment();
-    await loadRequests();
+        await createAuditLog("RELEASED", "Borrowing", requestId, `Released ${req.quantity} x ${req.equipment?.name} to ${req.borrower_name}`);
+        toast(`Equipment released to ${req.borrower_name}.`, "success", "Released");
+        await refreshAllData();
+    });
 }
 
 /**
  * PROCESS RETURN (BR-A4-06, BR-A4-08)
  */
-async function processReturn(requestId) {
+async function processReturn(requestId, btn) {
+    const role = currentProfile?.role;
+    if (role !== "admin" && role !== "staff") return toast("Only Admin or Staff can process returns.", "error", "Unauthorized");
+
     const req = borrowingRequestRecords.find(r => r.id === requestId);
     if (!req) return;
 
     // BR-A4-08: Returned transactions cannot be processed twice
     if (req.status === "Returned" || req.status === "Closed") {
-        alert("Duplicate return: This borrowing transaction has already been returned.");
-        return;
+        return toast("This borrowing transaction has already been returned.", "warning", "Duplicate return");
     }
 
-    const condition = prompt("Enter return condition of equipment (Good / Fair / For Repair / Damaged):", "Good");
-    if (!condition) return;
+    const lateDays = Math.max(0, -daysUntil(req.expected_return_date));
+    const result = await openModal({
+        title: `Process return for #${requestId}`,
+        message: `${req.quantity} x ${req.equipment?.name} from ${req.borrower_name}${lateDays ? ` · ${lateDays} day(s) late` : ""}`,
+        fields: [
+            {
+                name: "condition", label: "Condition on return", type: "select", value: "Good", required: true,
+                options: [
+                    { value: "Good", label: "Good - ready for use" },
+                    { value: "Fair", label: "Fair - minor wear" },
+                    { value: "For Repair", label: "For Repair - send to maintenance" },
+                    { value: "Damaged", label: "Damaged - send to maintenance" }
+                ]
+            },
+            { name: "remarks", label: "Remarks", type: "textarea", placeholder: "Optional notes (missing accessories, issues found...)" }
+        ],
+        confirmText: "Confirm return",
+        variant: "primary",
+        iconName: "undo-2"
+    });
+    if (!result) return;
 
-    const todayStr = new Date().toISOString().split("T")[0];
+    const condition = result.condition;
+    const needsRepair = condition === "For Repair" || condition === "Damaged";
 
-    // 1. Update Borrowing Request
-    const { error: reqErr } = await supabaseClient
-        .from("borrowing_requests")
-        .update({
+    await withBusy(btn, async () => {
+        const { data, error: reqErr } = await updateRequestRow(requestId, {
             status: "Returned",
-            actual_return_date: todayStr,
+            actual_return_date: todayStr(),
             returned_by: currentUser.id,
-            returned_at: new Date().toISOString()
-        })
-        .eq("id", requestId);
+            returned_at: new Date().toISOString(),
+            remarks: result.remarks || (lateDays ? `Returned ${lateDays} day(s) late` : null)
+        });
 
-    if (reqErr) {
-        alert("Return processing failed: " + reqErr.message);
-        return;
-    }
+        if (reqErr) return toast("Return processing failed: " + friendlyDbError(reqErr), "error");
+        if (!data?.length) return toast("Unable to update this request.", "error");
 
-    // 2. BR-A4-06: Returned equipment becomes Available unless damaged
-    let newEquipmentStatus = "Available";
-    let newCondition = condition;
+        // BR-A4-06: Returned equipment becomes available unless damaged
+        const { data: currentEquip } = await supabaseClient.from("equipment").select("*").eq("id", req.equipment_id).single();
+        if (currentEquip) {
+            const updatedAvailQty = Math.min(currentEquip.quantity, currentEquip.available_quantity + req.quantity);
+            let newStatus = currentEquip.status;
+            let newCondition = currentEquip.condition;
 
-    if (condition.toLowerCase().includes("damaged") || condition.toLowerCase().includes("repair")) {
-        newEquipmentStatus = "Maintenance";
-        // Create maintenance request automatically if returned damaged
-        await supabaseClient.from("maintenance_requests").insert([{
-            equipment_id: req.equipment_id,
-            requested_by: currentUser.id,
-            issue_description: `Returned in ${condition} condition by ${req.borrower_name} (Request #${requestId})`,
-            status: "Pending"
-        }]);
-    }
+            if (needsRepair) {
+                newStatus = "Maintenance";
+                newCondition = condition;
+            } else if (currentEquip.status === "Borrowed" || currentEquip.status === "Available") {
+                newStatus = updatedAvailQty > 0 ? "Available" : "Borrowed";
+                if (currentEquip.quantity === 1) newCondition = condition;
+            }
 
-    // Fetch current equipment to safely update available quantity
-    const { data: currentEquip } = await supabaseClient.from("equipment").select("*").eq("id", req.equipment_id).single();
-    const updatedAvailQty = (currentEquip ? currentEquip.available_quantity : 0) + req.quantity;
+            await supabaseClient.from("equipment").update({
+                available_quantity: updatedAvailQty,
+                status: newStatus,
+                condition: newCondition
+            }).eq("id", req.equipment_id);
+        }
 
-    await supabaseClient.from("equipment").update({
-        available_quantity: updatedAvailQty,
-        status: newEquipmentStatus,
-        condition: newCondition
-    }).eq("id", req.equipment_id);
+        if (needsRepair) {
+            const { data: ticket } = await supabaseClient.from("maintenance_requests").insert([{
+                equipment_id: req.equipment_id,
+                requested_by: currentUser.id,
+                issue_description: `Returned in ${condition} condition by ${req.borrower_name} (Request #${requestId})${result.remarks ? ": " + result.remarks : ""}`,
+                status: "Pending"
+            }]).select().single();
+            if (ticket) await createAuditLog("MAINTENANCE_REQUESTED", "Maintenance", ticket.id, `Auto-created maintenance ticket for ${req.equipment?.name} after damaged return`);
+        }
 
-    // Audit Log (BR-A4-10)
-    await createAuditLog("RETURNED", "Borrowing", requestId, `Processed return for ${req.equipment?.name}. Condition: ${condition}`);
+        await createAuditLog("RETURNED", "Borrowing", requestId,
+            `Processed return of ${req.equipment?.name} from ${req.borrower_name}. Condition: ${condition}${lateDays ? `. ${lateDays} day(s) late` : ""}`);
 
-    alert("Equipment return processed successfully!");
-    await loadEquipment();
-    await loadRequests();
+        toast(needsRepair ? "Return recorded and a maintenance ticket was created." : "Return recorded. Stock has been restored.", "success", "Returned");
+        await refreshAllData();
+    });
+}
+
+/**
+ * CANCEL (Requester, only while Pending)
+ */
+async function cancelRequest(requestId, btn) {
+    const req = borrowingRequestRecords.find(r => r.id === requestId);
+    if (!req || req.requester_id !== currentUser?.id) return;
+    if (req.status !== "Pending") return toast("Only pending requests can be cancelled.", "warning");
+
+    const ok = await confirmDialog(`Cancel request #${requestId}?`, `Your request for ${req.equipment?.name} will be withdrawn.`,
+        { confirmText: "Cancel request", variant: "danger", iconName: "x" });
+    if (!ok) return;
+
+    await withBusy(btn, async () => {
+        const { data, error } = await updateRequestRow(requestId, { status: "Cancelled" }, ["status", "Pending"]);
+
+        if (error || !data?.length) {
+            console.error("Cancel failed:", error?.message);
+            return toast("The database does not allow cancellation yet. Ask the administrator to run the upgrade script in seed_data.sql.", "error", "Cannot cancel");
+        }
+
+        await createAuditLog("CANCELLED", "Borrowing", requestId, `Requester cancelled borrowing request for ${req.equipment?.name}`);
+        toast(`Request #${requestId} was cancelled.`, "info", "Cancelled");
+        await refreshAllData();
+    });
+}
+
+/**
+ * Request details with a status timeline
+ */
+function showRequestDetails(requestId) {
+    const req = borrowingRequestRecords.find(r => r.id === requestId);
+    if (!req) return;
+    const status = effectiveStatus(req);
+
+    const step = (done, label, when, who, variant = "") => `
+        <li class="tl-item ${done ? "done" : ""} ${variant}">
+            <span class="tl-dot"></span>
+            <div><strong>${label}</strong><small>${done ? `${when ? formatDateTime(when) : ""}${who ? " · " + escapeHTML(who) : ""}` : "Not yet"}</small></div>
+        </li>`;
+
+    const decided = req.approved_at && ["Rejected"].includes(req.status);
+    const timeline = `
+        <ul class="timeline">
+            ${step(true, "Request submitted", req.created_at, req.borrower_name)}
+            ${decided
+                ? step(true, "Rejected", req.approved_at, req.approver?.full_name, "tl-danger")
+                : req.status === "Cancelled"
+                    ? step(true, "Cancelled by requester", req.updated_at, req.borrower_name, "tl-muted")
+                    : step(!!req.approved_at, "Approved", req.approved_at, req.approver?.full_name)}
+            ${["Rejected", "Cancelled"].includes(req.status) ? "" : step(!!req.released_at, "Released to borrower", req.released_at, req.releaser?.full_name)}
+            ${["Rejected", "Cancelled"].includes(req.status) ? "" : step(!!req.returned_at, "Returned", req.returned_at, req.receiver?.full_name, status === "Overdue" ? "tl-danger" : "")}
+        </ul>`;
+
+    const body = `
+        <div class="detail-grid">
+            <div><span>Status</span>${requestStatusBadge(status)}</div>
+            <div><span>Equipment</span><strong>${escapeHTML(req.equipment?.name || "")}</strong><small><code>${escapeHTML(req.equipment?.equipment_code || "")}</code></small></div>
+            <div><span>Borrower</span><strong>${escapeHTML(req.borrower_name)}</strong><small>${escapeHTML(req.borrower_type)} · ${escapeHTML(req.department)}</small></div>
+            <div><span>Quantity</span><strong>${req.quantity}</strong></div>
+            <div><span>Borrow period</span><strong>${formatDate(req.request_date)} → ${formatDate(req.expected_return_date)}</strong>${["Released", "Overdue"].includes(status) ? `<small class="${status === "Overdue" ? "text-danger" : ""}">${dueLabel(req.expected_return_date)}</small>` : ""}</div>
+            <div><span>Actual return</span><strong>${formatDate(req.actual_return_date)}</strong></div>
+            <div class="span-2"><span>Purpose</span><p>${escapeHTML(req.purpose)}</p></div>
+            ${req.remarks ? `<div class="span-2"><span>Remarks</span><p>${escapeHTML(req.remarks)}</p></div>` : ""}
+        </div>
+        <h4 class="detail-subhead">Timeline</h4>
+        ${timeline}`;
+
+    openModal({ title: `Request #${req.id}`, bodyHtml: body, cancelText: "Close", hideConfirm: true, iconName: "file-text", wide: true });
+}
+
+function requestStatusBadge(status) {
+    const map = {
+        Pending: "hourglass", Approved: "thumbs-up", Rejected: "circle-x", Released: "package-open",
+        Returned: "circle-check", Overdue: "alarm-clock", Closed: "archive", Cancelled: "ban"
+    };
+    return `<span class="badge ${getStatusBadgeClass(status)}">${icon(map[status] || "circle")}${escapeHTML(status)}</span>`;
 }
 
 function getStatusBadgeClass(status) {
@@ -500,18 +633,21 @@ function getStatusBadgeClass(status) {
         case "Released": return "badge-primary";
         case "Returned": return "badge-success";
         case "Overdue": return "badge-danger";
-        case "Closed": return "badge-secondary";
         default: return "badge-secondary";
     }
 }
 
-// Attach DOM Event Listeners
-document.addEventListener("DOMContentLoaded", () => {
-    const form = document.getElementById("borrowingRequestForm");
-    if (form) form.addEventListener("submit", submitBorrowingRequest);
+function setDefaultReturnDate() {
+    const dateInput = document.getElementById("requestExpectedReturnDate");
+    if (!dateInput) return;
+    dateInput.min = todayStr();
+    dateInput.max = addDaysStr(30);
+    if (!dateInput.value) dateInput.value = addDaysStr(3);
+}
 
-    const search = document.getElementById("requestSearch");
-    const filter = document.getElementById("requestStatusFilter");
-    if (search) search.addEventListener("input", displayRequests);
-    if (filter) filter.addEventListener("change", displayRequests);
+document.addEventListener("DOMContentLoaded", () => {
+    document.getElementById("borrowingRequestForm")?.addEventListener("submit", submitBorrowingRequest);
+    document.getElementById("requestSearch")?.addEventListener("input", displayRequests);
+    document.getElementById("requestStatusFilter")?.addEventListener("change", displayRequests);
+    setDefaultReturnDate();
 });

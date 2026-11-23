@@ -18,6 +18,26 @@ A web-based system for managing laboratory equipment borrowing, maintenance, and
 | **Laboratory Staff** | Manages equipment, releases/returns borrowed items, handles maintenance |
 | **Requester** | Browses available equipment, submits borrowing requests, views own history |
 
+## Role Dashboards
+
+| Role | Dashboard highlights |
+|---|---|
+| **Administrator** | KPIs (assets, available units, units on loan, pending approvals, overdue, open maintenance), 14-day request chart, inventory breakdown, one-click approval queue, requests by status, overdue & due-soon loans, units by category, most-requested equipment, maintenance tickets, recent activity |
+| **Laboratory Staff** | Today's desk: release queue with Release buttons, returns desk sorted by due date with Return buttons, maintenance queue with Start/Complete, low-stock list, inventory breakdown, request volume |
+| **Requester** | Overdue and ready-for-pickup alerts, borrowed items with due countdown, request tracker (Submitted → Approved → Released → Returned), on-time return record, available-now quick requests |
+
+## Database Setup & Demo Data
+
+1. Run `schema.sql` in the Supabase **SQL Editor** for a fresh database. It creates the tables, RLS policies, and triggers.
+2. Run `seed_data.sql` in the SQL Editor. It upgrades an existing database (adds the `Cancelled` status, a `remarks` column, a policy that lets requesters cancel pending requests, and a guard that stops non-admins from changing roles). Then it loads demo data: 12 login-ready accounts, 30+ equipment records, 34 borrowing requests in every status, maintenance tickets, and matching audit history. Re-running it is safe: existing records are skipped.
+
+| Role | Email | Password |
+|---|---|---|
+| Admin | admin@test.com | Admin@12345 |
+| Staff | staff@test.com | Staff@12345 |
+| Requester | requester@test.com | Request@12345 |
+| Others | admin2@, staff2@, paolo.garcia@, bea.villanueva@, miguel.ramos@, sofia.navarro@, ramon.aquino@, kristine.lim@, leo.bautista@ (all `@test.com`) | Test@12345 |
+
 ---
 
 ## Systems Analysis & Design (SAD) Documentation

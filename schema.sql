@@ -55,7 +55,8 @@ CREATE TABLE borrowing_requests (
     request_date DATE NOT NULL DEFAULT CURRENT_DATE,
     expected_return_date DATE NOT NULL,
     actual_return_date DATE,
-    status TEXT NOT NULL DEFAULT 'Pending' CHECK (status IN ('Pending', 'Approved', 'Rejected', 'Released', 'Returned', 'Overdue', 'Closed')),
+    status TEXT NOT NULL DEFAULT 'Pending' CHECK (status IN ('Pending', 'Approved', 'Rejected', 'Released', 'Returned', 'Overdue', 'Closed', 'Cancelled')),
+    remarks TEXT,
     approved_by UUID REFERENCES profiles(id),
     approved_at TIMESTAMPTZ,
     released_by UUID REFERENCES profiles(id),
@@ -141,6 +142,21 @@ CREATE TRIGGER update_equipment_modtime BEFORE UPDATE ON equipment FOR EACH ROW 
 CREATE TRIGGER update_borrowing_modtime BEFORE UPDATE ON borrowing_requests FOR EACH ROW EXECUTE FUNCTION update_timestamp();
 CREATE TRIGGER update_maintenance_modtime BEFORE UPDATE ON maintenance_requests FOR EACH ROW EXECUTE FUNCTION update_timestamp();
 
+-- Security: only Administrators can change a user's role
+CREATE OR REPLACE FUNCTION public.prevent_role_self_escalation()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.role IS DISTINCT FROM OLD.role
+       AND auth.uid() IS NOT NULL
+       AND public.get_user_role() <> 'admin' THEN
+        RAISE EXCEPTION 'Only administrators can change user roles';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE TRIGGER guard_profile_role_change BEFORE UPDATE ON profiles FOR EACH ROW EXECUTE FUNCTION public.prevent_role_self_escalation();
+
 -- ============================================================================
 -- 4. ROW LEVEL SECURITY (RLS) POLICIES
 -- ============================================================================
@@ -221,6 +237,12 @@ CREATE POLICY "Borrowing requests update policy" ON borrowing_requests
         get_user_role() = 'admin' OR get_user_role() = 'staff'
     );
 
+-- Requesters may cancel ONLY their own requests, and ONLY while Pending
+CREATE POLICY "Borrowing requests requester cancel policy" ON borrowing_requests
+    FOR UPDATE TO authenticated
+    USING (requester_id = auth.uid() AND status = 'Pending')
+    WITH CHECK (requester_id = auth.uid() AND status = 'Cancelled');
+
 -- Delete: ONLY Admin can delete borrowing requests
 CREATE POLICY "Borrowing requests delete policy" ON borrowing_requests
     FOR DELETE TO authenticated
@@ -262,6 +284,8 @@ CREATE POLICY "Audit logs insert policy" ON audit_logs
 
 -- ============================================================================
 -- 5. SAMPLE TEST DATA
+--    For full demo data (test accounts, 30+ equipment, requests in every
+--    status, maintenance tickets, audit history) run seed_data.sql afterwards.
 -- ============================================================================
 
 INSERT INTO equipment (equipment_code, name, category, description, quantity, available_quantity, status, location, condition) VALUES

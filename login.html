@@ -3,38 +3,61 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Login - Laboratory Asset & Service Management System</title>
-    
+    <title>Sign in · LabTrack</title>
+
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="style.css">
 
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
     <script src="supabase.js"></script>
+    <script src="ui.js"></script>
     <script src="audit.js"></script>
     <script src="auth.js" defer></script>
 </head>
 
 <body class="login-body">
 
-    <div class="login-container">
-        <div class="login-card">
-            <div class="login-icon">🔬</div>
-            <h1>Lab Asset & Service Manager</h1>
-            <p class="login-subtitle">Laboratory Equipment & Borrowing System</p>
+    <aside class="login-hero">
+        <div class="sidebar-brand">
+            <div class="brand-mark"><i data-lucide="flask-conical"></i></div>
+            <div class="brand-text">
+                <strong>LabTrack</strong>
+                <span>Asset &amp; Service Manager</span>
+            </div>
+        </div>
 
-            <form id="loginForm">
-                
+        <div>
+            <h2>Laboratory equipment borrowing and maintenance, in one place.</h2>
+            <p>Track every asset, approve requests, hand over and receive equipment, and keep a complete audit trail.</p>
+            <ul class="hero-features">
+                <li><i data-lucide="shield-check"></i> Role-based access for Admin, Staff, and Requesters</li>
+                <li><i data-lucide="clipboard-check"></i> Approval → release → return workflow</li>
+                <li><i data-lucide="wrench"></i> Maintenance tickets that block unsafe equipment</li>
+                <li><i data-lucide="scroll-text"></i> Immutable audit logs for every transaction</li>
+            </ul>
+        </div>
+
+        <small>Laboratory Asset and Service Management System &copy; 2026 · Systems Analysis and Design Project</small>
+    </aside>
+
+    <main class="login-container">
+        <div class="login-card">
+            <h1 id="authTitle">Welcome back</h1>
+            <p class="login-subtitle" id="authSubtitle">Sign in to continue to LabTrack</p>
+
+            <form id="loginForm" novalidate>
                 <div class="form-group" id="fullNameGroup" style="display: none;">
                     <label for="fullName">Full Name *</label>
-                    <input type="text" id="fullName" placeholder="e.g. Maria Santos">
+                    <input type="text" id="fullName" placeholder="e.g. Maria Santos" autocomplete="name">
                 </div>
 
                 <div class="form-group" id="roleSelectGroup" style="display: none;">
                     <label for="registerRole">Role *</label>
                     <select id="registerRole">
-                        <option value="requester">Requester / Student / Faculty</option>
+                        <option value="requester">Requester (Student / Faculty)</option>
                         <option value="staff">Laboratory Staff</option>
                         <option value="admin">Administrator</option>
                     </select>
@@ -42,29 +65,43 @@
 
                 <div class="form-group">
                     <label for="email">Email Address *</label>
-                    <input type="email" id="email" placeholder="name@college.edu.ph" required>
+                    <input type="email" id="email" placeholder="name@college.edu.ph" autocomplete="email" required>
                 </div>
 
                 <div class="form-group">
                     <label for="password">Password *</label>
-                    <input type="password" id="password" placeholder="Enter your password" required>
+                    <input type="password" id="password" placeholder="Enter your password" autocomplete="current-password" required>
                 </div>
 
-                <button type="submit" class="btn btn-primary login-btn" id="authSubmitButton">
-                    Login
-                </button>
+                <button type="submit" class="btn btn-primary login-btn" id="authSubmitButton">Sign In</button>
 
-                <p id="loginMessage" class="login-message"></p>
+                <p id="loginMessage" class="login-message" role="status"></p>
 
                 <div class="auth-switch">
                     <span id="authSwitchText">Don't have an account?</span>
-                    <button type="button" class="link-button" id="authSwitchButton">
-                        Create one
-                    </button>
+                    <button type="button" class="link-button" id="authSwitchButton">Create one</button>
                 </div>
             </form>
-        </div>
-    </div>
 
+            <div class="demo-accounts">
+                <p>Demo accounts</p>
+                <div class="demo-grid">
+                    <button type="button" class="demo-btn" data-demo-label="Administrator" data-demo-email="admin@test.com" data-demo-password="Admin@12345">
+                        <i data-lucide="shield"></i>Admin
+                    </button>
+                    <button type="button" class="demo-btn" data-demo-label="Laboratory Staff" data-demo-email="staff@test.com" data-demo-password="Staff@12345">
+                        <i data-lucide="wrench"></i>Staff
+                    </button>
+                    <button type="button" class="demo-btn" data-demo-label="Requester" data-demo-email="requester@test.com" data-demo-password="Request@12345">
+                        <i data-lucide="user"></i>Requester
+                    </button>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        if (window.lucide) lucide.createIcons();
+    </script>
 </body>
 </html>
