@@ -3,628 +3,69 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LabTrack · Laboratory Asset and Service Management System</title>
-
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=2">
-
-    <!-- Supabase SDK + Lucide icons -->
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
-
-    <!-- Application Scripts -->
-    <script src="supabase.js?v=2"></script>
-    <script src="ui.js?v=2"></script>
-    <script src="audit.js?v=2"></script>
-    <script src="auth.js?v=2"></script>
-    <script src="equipment.js?v=2"></script>
-    <script src="requests.js?v=2"></script>
-    <script src="maintenance.js?v=2"></script>
-    <script src="users.js?v=2"></script>
-    <script src="dashboard.js?v=2"></script>
+    <title>Student Scholarship Monitoring and Academic Compliance System</title>
+    <link rel="stylesheet" href="css/styles.css">
 </head>
-<body class="app-body">
+<body class="scholar-layout">
+    <nav class="top-navbar">
+        <a href="index.html" class="brand">
+            <span class="brand-icon">🎓</span>
+            <span class="brand-title">SSMAS | Scholarship & Compliance</span>
+        </a>
+        <div class="nav-links">
+            <a href="login.html" class="nav-link">Sign In</a>
+            <a href="tests/runner.html" class="nav-link">Test Runner (TC01-TC10)</a>
+        </div>
+    </nav>
 
-<div class="app-shell">
-
-    <!-- ===================== SIDEBAR ===================== -->
-    <aside class="sidebar" id="sidebar">
-        <div class="sidebar-brand">
-            <div class="brand-mark"><i data-lucide="flask-conical"></i></div>
-            <div class="brand-text">
-                <strong>LabTrack</strong>
-                <span>Asset &amp; Service Manager</span>
+    <main class="main-content">
+        <div class="card" style="padding: 2.5rem; text-align: center; background: linear-gradient(135deg, #1e3a8a 0%, #0284c7 100%); color: #ffffff; border: none; margin-top: 1rem;">
+            <span class="badge badge-info" style="margin-bottom: 1rem; align-self: center;">ITPC111 – Systems Analysis and Design Midterm Laboratory Examination</span>
+            <h1 style="font-size: 2.25rem; font-weight: 800; margin-bottom: 0.75rem;">Student Scholarship Monitoring and Academic Compliance System</h1>
+            <p style="font-size: 1.1rem; max-width: 800px; margin: 0 auto 1.75rem auto; color: #e0f2fe;">
+                A centralized, role-based platform administering academic summary submissions, document verification, policy compliance evaluations, and scholarship renewal decisions for Merit and Community Scholars.
+            </p>
+            <div style="display: flex; justify-content: center; gap: 1rem; flex-wrap: wrap;">
+                <a href="login.html" class="btn btn-warning" style="font-size: 1rem; padding: 0.75rem 1.75rem;">Access System Portal</a>
+                <a href="tests/runner.html" class="btn btn-outline" style="background: rgba(255,255,255,0.15); color: #fff; border-color: rgba(255,255,255,0.4); font-size: 1rem; padding: 0.75rem 1.75rem;">Run Functional Tests (TC01–TC10)</a>
             </div>
         </div>
 
-        <nav class="sidebar-nav" aria-label="Main navigation">
-            <div class="nav-group-label">Overview</div>
-            <button class="nav-link active" data-section="dashboardSection" onclick="showSection('dashboardSection')">
-                <i data-lucide="layout-dashboard"></i><span>Dashboard</span>
-            </button>
+        <!-- Scholarship Program Cards (rendered by js/program-cards.js) -->
+        <div id="program-cards" class="program-cards-grid" style="margin-top: 2rem;"></div>
 
-            <div class="nav-group-label" data-role-required="admin,staff">Operations</div>
-            <button class="nav-link" data-section="equipmentSection" data-role-required="admin,staff" onclick="showSection('equipmentSection')">
-                <i data-lucide="package"></i><span>Equipment</span>
-            </button>
-            <button class="nav-link" data-section="requestsSection" data-role-required="admin,staff" onclick="showSection('requestsSection')">
-                <i data-lucide="clipboard-list"></i><span>Borrowing Requests</span>
-                <span class="nav-count" id="navPendingCount" hidden></span>
-            </button>
-            <button class="nav-link" data-section="maintenanceSection" data-role-required="admin,staff" onclick="showSection('maintenanceSection')">
-                <i data-lucide="wrench"></i><span>Maintenance</span>
-                <span class="nav-count nav-count-warn" id="navMaintCount" hidden></span>
-            </button>
-
-            <div class="nav-group-label" data-role-required="requester">Borrowing</div>
-            <button class="nav-link" data-section="availableEquipmentSection" data-role-required="requester" onclick="showSection('availableEquipmentSection')">
-                <i data-lucide="search"></i><span>Browse Equipment</span>
-            </button>
-            <button class="nav-link" data-section="myRequestsSection" data-role-required="requester" onclick="showSection('myRequestsSection')">
-                <i data-lucide="file-plus-2"></i><span>My Requests</span>
-                <span class="nav-count" id="navMyActiveCount" hidden></span>
-            </button>
-            <button class="nav-link" data-section="myHistorySection" data-role-required="requester" onclick="showSection('myHistorySection')">
-                <i data-lucide="history"></i><span>My History</span>
-            </button>
-
-            <div class="nav-group-label" data-role-required="admin">Administration</div>
-            <button class="nav-link" data-section="usersSection" data-role-required="admin" onclick="showSection('usersSection')">
-                <i data-lucide="users"></i><span>User Management</span>
-            </button>
-            <button class="nav-link" data-section="auditLogsSection" data-role-required="admin" onclick="showSection('auditLogsSection')">
-                <i data-lucide="scroll-text"></i><span>Audit Logs</span>
-            </button>
-        </nav>
-
-        <div class="sidebar-footer">
-            <div class="sidebar-user">
-                <div class="avatar" id="sidebarAvatar">?</div>
-                <div class="sidebar-user-info">
-                    <span id="headerUserName" class="user-name">Loading...</span>
-                    <span id="headerUserRole" class="user-role">ROLE</span>
+        <!-- Role Access Cards -->
+        <div class="card mt-4">
+            <div class="card-header">
+                <h3>User Roles & Workflow Architecture</h3>
+            </div>
+            <div class="card-body">
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.5rem;">
+                    <div>
+                        <h4 style="color: var(--primary); margin-bottom: 0.5rem;">Scholar Role</h4>
+                        <p class="text-sm text-muted">Scholars can log in securely, view their assigned scholarship program, submit semester academic summaries with official grade document references, monitor verification status, and resubmit returned applications with corrected data.</p>
+                        <a href="login.html" class="btn btn-outline btn-sm mt-3">Scholar Access</a>
+                    </div>
+                    <div>
+                        <h4 style="color: var(--primary); margin-bottom: 0.5rem;">Scholarship Staff Role</h4>
+                        <p class="text-sm text-muted">Staff members oversee the verification queue, substantiate grade evidence, trigger the automated compliance evaluation engine, record explicit renewal decisions (Approved or Held), and review system audit history.</p>
+                        <a href="login.html" class="btn btn-primary btn-sm mt-3">Staff Dashboard Login</a>
+                    </div>
                 </div>
             </div>
-            <button class="logout-btn" onclick="logout()" title="Sign out">
-                <i data-lucide="log-out"></i><span>Sign out</span>
-            </button>
         </div>
-    </aside>
-    <div class="sidebar-backdrop" id="sidebarBackdrop" onclick="toggleSidebar(false)"></div>
+    </main>
 
-    <!-- ===================== MAIN AREA ===================== -->
-    <div class="app-main">
-        <header class="topbar">
-            <button class="icon-btn menu-btn" onclick="toggleSidebar()" aria-label="Open menu"><i data-lucide="menu"></i></button>
-            <div class="topbar-title">
-                <span class="topbar-crumb">LabTrack</span>
-                <i data-lucide="chevron-right" class="crumb-sep"></i>
-                <strong id="topbarSectionTitle">Dashboard</strong>
-            </div>
-            <div class="topbar-actions">
-                <span class="topbar-date" id="topbarDate"></span>
-                <button class="icon-btn" id="refreshBtn" onclick="refreshAllData(true)" title="Refresh data" aria-label="Refresh data">
-                    <i data-lucide="refresh-cw"></i>
-                </button>
-                <div class="topbar-user">
-                    <div class="avatar avatar-sm" id="topbarAvatar">?</div>
-                </div>
-            </div>
-        </header>
+    <footer style="text-align: center; padding: 2rem; color: var(--text-muted); font-size: 0.8rem; border-top: 1px solid var(--border-color); margin-top: 3rem;">
+        Student Scholarship Monitoring and Academic Compliance System &bull; ITPC111 Systems Analysis and Design &bull; Academic Year 2026–2027
+    </footer>
 
-        <main class="main-content">
-
-            <!-- =========================================================
-                 1. DASHBOARD (content rendered per role by dashboard.js)
-            ========================================================== -->
-            <section id="dashboardSection" class="page-section">
-                <div id="dashboardContent">
-                    <div class="loading-state"><div class="spinner"></div><p>Loading dashboard...</p></div>
-                </div>
-            </section>
-
-            <!-- =========================================================
-                 2. EQUIPMENT MANAGEMENT (ADMIN & STAFF)
-            ========================================================== -->
-            <section id="equipmentSection" class="page-section hidden">
-                <div class="page-header">
-                    <div>
-                        <h2>Equipment Inventory</h2>
-                        <p>Manage asset records, quantities, locations, and operational condition</p>
-                    </div>
-                    <button class="btn btn-primary" onclick="openEquipmentForm()"><i data-lucide="plus"></i> Add Equipment</button>
-                </div>
-
-                <div class="summary-chips" id="equipmentSummaryChips"></div>
-
-                <!-- Add / Edit Equipment Form -->
-                <div class="card-panel hidden" id="equipmentFormPanel">
-                    <div class="panel-header">
-                        <h3 id="equipmentFormTitle">Add New Equipment</h3>
-                        <button class="icon-btn" type="button" onclick="clearEquipmentForm(true)" aria-label="Close form"><i data-lucide="x"></i></button>
-                    </div>
-                    <form id="equipmentForm">
-                        <input type="hidden" id="equipmentId">
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label for="equipmentName">Equipment Name *</label>
-                                <input type="text" id="equipmentName" placeholder="e.g. Dell Latitude 5440 Laptop" required>
-                            </div>
-                            <div class="form-group">
-                                <label for="equipmentCode">Asset Code *</label>
-                                <input type="text" id="equipmentCode" placeholder="e.g. LAP-001" required>
-                            </div>
-                            <div class="form-group">
-                                <label for="equipmentCategory">Category *</label>
-                                <select id="equipmentCategory" required>
-                                    <option value="">Select Category</option>
-                                    <option value="Laptop">Laptop</option>
-                                    <option value="Tablet">Tablet</option>
-                                    <option value="Projector">Projector</option>
-                                    <option value="Camera">Camera</option>
-                                    <option value="Microphone">Microphone</option>
-                                    <option value="Speaker">Speaker / Audio</option>
-                                    <option value="Router">Router / Networking</option>
-                                    <option value="Microcontroller">Microcontroller Kit</option>
-                                    <option value="Toolkit">Computer Toolkit</option>
-                                    <option value="Other">Other ICT Equipment</option>
-                                </select>
-                            </div>
-                        </div>
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label for="equipmentQuantity">Total Quantity *</label>
-                                <input type="number" id="equipmentQuantity" min="1" value="1" required>
-                                <small class="field-help" id="equipmentQtyHelp"></small>
-                            </div>
-                            <div class="form-group">
-                                <label for="equipmentLocation">Location</label>
-                                <input type="text" id="equipmentLocation" placeholder="e.g. Lab 101 / AVR Room" value="Main Laboratory">
-                            </div>
-                            <div class="form-group">
-                                <label for="equipmentCondition">Condition</label>
-                                <select id="equipmentCondition">
-                                    <option value="Good">Good</option>
-                                    <option value="Fair">Fair</option>
-                                    <option value="For Repair">For Repair</option>
-                                    <option value="Damaged">Damaged</option>
-                                </select>
-                            </div>
-                        </div>
-                        <div class="form-group">
-                            <label for="equipmentDescription">Description / Specifications</label>
-                            <textarea id="equipmentDescription" rows="2" placeholder="Specifications, serial numbers, accessories included..."></textarea>
-                        </div>
-                        <div class="form-actions">
-                            <button type="submit" class="btn btn-primary" id="equipmentSaveBtn"><i data-lucide="save"></i> Save Equipment</button>
-                            <button type="button" class="btn btn-light" onclick="clearEquipmentForm(true)">Cancel</button>
-                        </div>
-                    </form>
-                </div>
-
-                <div class="card-panel no-pad">
-                    <div class="table-toolbar">
-                        <div class="search-wrap">
-                            <i data-lucide="search"></i>
-                            <input type="text" id="equipmentSearch" placeholder="Search name, code, category, location..." class="search-input">
-                        </div>
-                        <select id="equipmentCategoryFilter" class="filter-select">
-                            <option value="All">All Categories</option>
-                        </select>
-                        <select id="equipmentStatusFilter" class="filter-select">
-                            <option value="All">All Statuses</option>
-                            <option value="Available">Available</option>
-                            <option value="Borrowed">Borrowed</option>
-                            <option value="Maintenance">Maintenance</option>
-                            <option value="Damaged">Damaged</option>
-                        </select>
-                    </div>
-                    <div class="table-responsive">
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th>Asset</th>
-                                    <th>Category</th>
-                                    <th>Stock</th>
-                                    <th>Location</th>
-                                    <th>Condition</th>
-                                    <th>Status</th>
-                                    <th class="text-right">Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody id="equipmentTableBody"></tbody>
-                        </table>
-                    </div>
-                    <div class="table-footer" id="equipmentTableFooter"></div>
-                </div>
-            </section>
-
-            <!-- =========================================================
-                 3. AVAILABLE EQUIPMENT (REQUESTER)
-            ========================================================== -->
-            <section id="availableEquipmentSection" class="page-section hidden">
-                <div class="page-header">
-                    <div>
-                        <h2>Browse Equipment</h2>
-                        <p>Equipment currently available for borrowing</p>
-                    </div>
-                </div>
-
-                <div class="toolbar-card">
-                    <div class="search-wrap">
-                        <i data-lucide="search"></i>
-                        <input type="text" id="availableSearch" placeholder="Search equipment name, code, or description..." class="search-input">
-                    </div>
-                    <select id="availableCategoryFilter" class="filter-select">
-                        <option value="All">All Categories</option>
-                    </select>
-                </div>
-
-                <div id="availableEquipmentGrid" class="equipment-grid"></div>
-            </section>
-
-            <!-- =========================================================
-                 4. BORROWING REQUESTS (ADMIN & STAFF)
-            ========================================================== -->
-            <section id="requestsSection" class="page-section hidden">
-                <div class="page-header">
-                    <div>
-                        <h2>Borrowing Requests</h2>
-                        <p id="requestsSectionSubtitle">Review, approve, release, and process returns for laboratory equipment</p>
-                    </div>
-                </div>
-
-                <div class="status-tabs" id="requestStatusTabs"></div>
-
-                <div class="card-panel no-pad">
-                    <div class="table-toolbar">
-                        <div class="search-wrap">
-                            <i data-lucide="search"></i>
-                            <input type="text" id="requestSearch" placeholder="Search borrower, equipment, department, purpose..." class="search-input">
-                        </div>
-                        <select id="requestStatusFilter" class="filter-select">
-                            <option value="All">All Statuses</option>
-                            <option value="Pending">Pending</option>
-                            <option value="Approved">Approved</option>
-                            <option value="Released">Released</option>
-                            <option value="Overdue">Overdue</option>
-                            <option value="Returned">Returned</option>
-                            <option value="Rejected">Rejected</option>
-                            <option value="Cancelled">Cancelled</option>
-                        </select>
-                    </div>
-                    <div class="table-responsive">
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th>Request</th>
-                                    <th>Borrower</th>
-                                    <th>Equipment</th>
-                                    <th>Qty</th>
-                                    <th>Borrow Period</th>
-                                    <th>Status</th>
-                                    <th class="text-right">Action</th>
-                                </tr>
-                            </thead>
-                            <tbody id="requestsTableBody"></tbody>
-                        </table>
-                    </div>
-                    <div class="table-footer" id="requestsTableFooter"></div>
-                </div>
-            </section>
-
-            <!-- =========================================================
-                 5. REQUESTER: SUBMIT & TRACK
-            ========================================================== -->
-            <section id="myRequestsSection" class="page-section hidden">
-                <div class="page-header">
-                    <div>
-                        <h2>My Requests</h2>
-                        <p>Submit borrowing requests and track their approval progress</p>
-                    </div>
-                </div>
-
-                <div class="two-col">
-                    <div class="card-panel">
-                        <div class="panel-header">
-                            <h3><i data-lucide="file-plus-2"></i> New Borrowing Request</h3>
-                        </div>
-                        <form id="borrowingRequestForm">
-                            <div class="form-row">
-                                <div class="form-group">
-                                    <label for="requestBorrowerName">Borrower Full Name *</label>
-                                    <input type="text" id="requestBorrowerName" required>
-                                </div>
-                                <div class="form-group">
-                                    <label for="requestBorrowerType">Borrower Type *</label>
-                                    <select id="requestBorrowerType" required>
-                                        <option value="Student">Student</option>
-                                        <option value="Faculty">Faculty</option>
-                                        <option value="Staff">Staff</option>
-                                    </select>
-                                </div>
-                            </div>
-                            <div class="form-row">
-                                <div class="form-group">
-                                    <label for="requestDepartment">Department / Course *</label>
-                                    <input type="text" id="requestDepartment" placeholder="e.g. BSIT 3-A" required>
-                                </div>
-                                <div class="form-group">
-                                    <label for="requestEquipmentSelect">Equipment *</label>
-                                    <select id="requestEquipmentSelect" required>
-                                        <option value="">-- Select Equipment --</option>
-                                    </select>
-                                </div>
-                            </div>
-                            <div class="form-row">
-                                <div class="form-group">
-                                    <label for="requestQuantity">Quantity *</label>
-                                    <input type="number" id="requestQuantity" min="1" value="1" required>
-                                    <small class="field-help" id="requestQtyHelp"></small>
-                                </div>
-                                <div class="form-group">
-                                    <label for="requestExpectedReturnDate">Expected Return Date *</label>
-                                    <input type="date" id="requestExpectedReturnDate" required>
-                                </div>
-                            </div>
-                            <div class="form-group">
-                                <label for="requestPurpose">Purpose of Borrowing *</label>
-                                <textarea id="requestPurpose" rows="3" placeholder="e.g. Capstone defense presentation in Room 302" required></textarea>
-                            </div>
-                            <button type="submit" class="btn btn-primary btn-block" id="requestSubmitBtn"><i data-lucide="send"></i> Submit Request for Approval</button>
-                        </form>
-                    </div>
-
-                    <div class="card-panel">
-                        <div class="panel-header">
-                            <h3><i data-lucide="route"></i> How borrowing works</h3>
-                        </div>
-                        <ol class="process-steps">
-                            <li><span class="step-dot">1</span><div><strong>Submit</strong><p>Choose equipment, quantity, and return date. Your request starts as <em>Pending</em>.</p></div></li>
-                            <li><span class="step-dot">2</span><div><strong>Admin review</strong><p>An administrator approves or rejects the request.</p></div></li>
-                            <li><span class="step-dot">3</span><div><strong>Pick up</strong><p>Laboratory staff release the equipment to you once approved.</p></div></li>
-                            <li><span class="step-dot">4</span><div><strong>Return</strong><p>Return the item on or before the due date. Late returns are flagged as <em>Overdue</em>.</p></div></li>
-                        </ol>
-                        <div class="note-box"><i data-lucide="info"></i><span>You can cancel a request while it is still pending.</span></div>
-                    </div>
-                </div>
-
-                <div class="card-panel no-pad">
-                    <div class="table-toolbar">
-                        <h3 class="toolbar-title">Active &amp; Pending Requests</h3>
-                    </div>
-                    <div class="table-responsive">
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th>Request</th>
-                                    <th>Equipment</th>
-                                    <th>Qty</th>
-                                    <th>Purpose</th>
-                                    <th>Borrow Period</th>
-                                    <th>Status</th>
-                                    <th class="text-right">Action</th>
-                                </tr>
-                            </thead>
-                            <tbody id="myRequestsTableBody"></tbody>
-                        </table>
-                    </div>
-                </div>
-            </section>
-
-            <!-- =========================================================
-                 6. REQUESTER HISTORY
-            ========================================================== -->
-            <section id="myHistorySection" class="page-section hidden">
-                <div class="page-header">
-                    <div>
-                        <h2>My Borrowing History</h2>
-                        <p>Returned, rejected, and cancelled borrowing transactions</p>
-                    </div>
-                </div>
-
-                <div class="card-panel no-pad">
-                    <div class="table-responsive">
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th>Request</th>
-                                    <th>Equipment</th>
-                                    <th>Qty</th>
-                                    <th>Purpose</th>
-                                    <th>Borrow Period</th>
-                                    <th>Status</th>
-                                    <th class="text-right">Details</th>
-                                </tr>
-                            </thead>
-                            <tbody id="myHistoryTableBody"></tbody>
-                        </table>
-                    </div>
-                </div>
-            </section>
-
-            <!-- =========================================================
-                 7. MAINTENANCE (ADMIN & STAFF)
-            ========================================================== -->
-            <section id="maintenanceSection" class="page-section hidden">
-                <div class="page-header">
-                    <div>
-                        <h2>Equipment Maintenance</h2>
-                        <p>Report equipment issues and track repair progress</p>
-                    </div>
-                </div>
-
-                <div class="summary-chips" id="maintenanceSummaryChips"></div>
-
-                <div class="card-panel">
-                    <div class="panel-header">
-                        <h3><i data-lucide="wrench"></i> Log Maintenance Issue</h3>
-                    </div>
-                    <form id="maintenanceForm">
-                        <div class="form-row form-row-maint">
-                            <div class="form-group">
-                                <label for="maintEquipmentSelect">Equipment *</label>
-                                <select id="maintEquipmentSelect" required>
-                                    <option value="">-- Select Equipment --</option>
-                                </select>
-                            </div>
-                            <div class="form-group">
-                                <label for="maintIssueDescription">Issue Description *</label>
-                                <input type="text" id="maintIssueDescription" placeholder="e.g. Projector lamp flickers / cracked screen" required>
-                            </div>
-                            <div class="form-group form-group-btn">
-                                <button type="submit" class="btn btn-warning btn-block" id="maintSubmitBtn"><i data-lucide="triangle-alert"></i> Log Issue</button>
-                            </div>
-                        </div>
-                    </form>
-                </div>
-
-                <div class="card-panel no-pad">
-                    <div class="table-toolbar">
-                        <div class="search-wrap">
-                            <i data-lucide="search"></i>
-                            <input type="text" id="maintenanceSearch" placeholder="Search equipment, issue, or reporter..." class="search-input">
-                        </div>
-                        <select id="maintenanceStatusFilter" class="filter-select">
-                            <option value="All">All Statuses</option>
-                            <option value="Pending">Pending</option>
-                            <option value="In Maintenance">In Maintenance</option>
-                            <option value="Completed">Completed</option>
-                            <option value="Cancelled">Cancelled</option>
-                        </select>
-                    </div>
-                    <div class="table-responsive">
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th>Ticket</th>
-                                    <th>Equipment</th>
-                                    <th>Issue</th>
-                                    <th>Reported</th>
-                                    <th>Resolution</th>
-                                    <th>Status</th>
-                                    <th class="text-right">Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody id="maintenanceTableBody"></tbody>
-                        </table>
-                    </div>
-                </div>
-            </section>
-
-            <!-- =========================================================
-                 8. USER MANAGEMENT (ADMIN)
-            ========================================================== -->
-            <section id="usersSection" class="page-section hidden">
-                <div class="page-header">
-                    <div>
-                        <h2>User Management</h2>
-                        <p>Manage system accounts and assign roles</p>
-                    </div>
-                </div>
-
-                <div class="summary-chips" id="userSummaryChips"></div>
-
-                <div class="card-panel no-pad">
-                    <div class="table-toolbar">
-                        <div class="search-wrap">
-                            <i data-lucide="search"></i>
-                            <input type="text" id="userSearch" placeholder="Search user name or email..." class="search-input">
-                        </div>
-                        <select id="userRoleFilter" class="filter-select">
-                            <option value="All">All Roles</option>
-                            <option value="admin">Administrator</option>
-                            <option value="staff">Laboratory Staff</option>
-                            <option value="requester">Requester</option>
-                        </select>
-                    </div>
-                    <div class="table-responsive">
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th>User</th>
-                                    <th>Role</th>
-                                    <th>Requests</th>
-                                    <th>Joined</th>
-                                    <th class="text-right">Change Role</th>
-                                </tr>
-                            </thead>
-                            <tbody id="usersTableBody"></tbody>
-                        </table>
-                    </div>
-                </div>
-            </section>
-
-            <!-- =========================================================
-                 9. AUDIT LOGS (ADMIN)
-            ========================================================== -->
-            <section id="auditLogsSection" class="page-section hidden">
-                <div class="page-header">
-                    <div>
-                        <h2>Audit Logs</h2>
-                        <p>Immutable record of system operations and administrative transactions</p>
-                    </div>
-                    <button class="btn btn-light" onclick="exportAuditLogsCSV()"><i data-lucide="download"></i> Export CSV</button>
-                </div>
-
-                <div class="card-panel no-pad">
-                    <div class="table-toolbar">
-                        <div class="search-wrap">
-                            <i data-lucide="search"></i>
-                            <input type="text" id="auditSearch" placeholder="Search by user, description, or record ID..." class="search-input">
-                        </div>
-                        <select id="auditActionFilter" class="filter-select">
-                            <option value="All">All Actions</option>
-                            <option value="CREATED">CREATED</option>
-                            <option value="UPDATED">UPDATED</option>
-                            <option value="DELETED">DELETED</option>
-                            <option value="APPROVED">APPROVED</option>
-                            <option value="REJECTED">REJECTED</option>
-                            <option value="RELEASED">RELEASED</option>
-                            <option value="RETURNED">RETURNED</option>
-                            <option value="CANCELLED">CANCELLED</option>
-                            <option value="MAINTENANCE_REQUESTED">MAINTENANCE_REQUESTED</option>
-                            <option value="MAINTENANCE_UPDATED">MAINTENANCE_UPDATED</option>
-                            <option value="LOGIN">LOGIN</option>
-                            <option value="LOGOUT">LOGOUT</option>
-                        </select>
-                        <select id="auditModuleFilter" class="filter-select">
-                            <option value="All">All Modules</option>
-                            <option value="Borrowing">Borrowing</option>
-                            <option value="Equipment">Equipment</option>
-                            <option value="Maintenance">Maintenance</option>
-                            <option value="Auth">Auth</option>
-                            <option value="Users">Users</option>
-                        </select>
-                    </div>
-                    <div class="table-responsive">
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th>Date / Time</th>
-                                    <th>User</th>
-                                    <th>Action</th>
-                                    <th>Module</th>
-                                    <th>Record</th>
-                                    <th>Description</th>
-                                </tr>
-                            </thead>
-                            <tbody id="auditLogTableBody"></tbody>
-                        </table>
-                    </div>
-                    <div class="table-footer" id="auditTableFooter"></div>
-                </div>
-            </section>
-
-        </main>
-
-        <footer class="app-footer">
-            <p>LabTrack · Laboratory Asset and Service Management System &copy; 2026 · Systems Analysis and Design Project</p>
-        </footer>
-    </div>
-</div>
-
+    <script src="js/config.js"></script>
+    <script src="js/program-cards.js"></script>
+    <script>
+        document.getElementById('program-cards').innerHTML = Object.values(CONFIG.PROGRAMS)
+            .map(p => window.renderProgramCard({ program_name: p.name, ...p }))
+            .join('');
+    </script>
 </body>
 </html>
